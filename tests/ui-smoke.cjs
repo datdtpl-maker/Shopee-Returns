@@ -36,9 +36,9 @@ const {_electron}=require('playwright');const assert=require('node:assert/strict
   await page.locator('#group-shipping').click();assert.equal(await page.locator('.shipping-group').count(),0);
   await page.locator('#group-shipping').click();
   await page.locator('#search').fill('SPXVN0123456789');assert.equal(await page.locator('#order-rows tr:not(.shipping-group)').count(),1);await page.locator('#search').fill('');
-  const first=page.locator('#order-rows tr:not(.shipping-group)').first();await first.getByRole('button',{name:'Đã báo shipper gửi lại hàng',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.process.shipper'));
-  await page.locator('#order-rows tr:not(.shipping-group)').first().getByRole('button',{name:'Đã nhận lại hàng',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.process.received'));
-  assert.equal(new Store(dir).data.orders.find(o=>o.orderId==='260901TEST002').state,'received');
+  assert.equal(await page.locator('[data-order],#state-filter,.process').count(),0);
+  assert.equal(await page.locator('thead th').count(),4);
+  assert.equal(await page.evaluate(()=>window.srm.call('order-state','any','received').then(()=>false).catch(()=>true)),true);
   await page.locator('nav [data-tab="profiles"]').click();
   await page.getByRole('button',{name:'Sửa tên',exact:true}).click();
   assert.equal(await page.locator('#rename-name').inputValue(),p.name);
@@ -94,8 +94,8 @@ const {_electron}=require('playwright');const assert=require('node:assert/strict
   do{cleared=await page.evaluate(()=>window.srm.call('snapshot'));if(cleared.notionAwaitScan&&!cleared.clearingNotion)break;await new Promise(r=>setTimeout(r,50));}while(Date.now()<clearDeadline);
   assert.equal(cleared.notionAwaitScan,true);assert.equal(cleared.notionClearPending,false);assert.equal(cleared.nextScan,null);
   assert.equal(fs.readdirSync(path.join(dir,'notion-backups')).length,1);
-  assert.equal(new Store(dir).data.orders.find(o=>o.orderId==='260901TEST002').state,'received');
-  assert.deepEqual(errors,[]);console.log('PASS: Electron UI, XSS escaping, tracking search, both actions, persisted settings, shipping groups/counts/filtering/persistence, 12 responsive layouts, scheduled scan with advanced test clock.');
+  assert.equal(new Store(dir).data.orders.find(o=>o.orderId==='260901TEST002').state,'new');
+  assert.deepEqual(errors,[]);console.log('PASS: Electron UI, XSS escaping, tracking search, raw-only view and blocked processing IPC, persisted settings, shipping groups/counts/filtering/persistence, 12 responsive layouts, scheduled scan with advanced test clock.');
  }finally{if(app)await app.close();fs.rmSync(dir,{recursive:true,force:true});}
 })().catch(e=>{console.error(e);process.exitCode=1;});
 

@@ -3,14 +3,12 @@ let groupShipping=false;
 try{groupShipping=localStorage.getItem('group-shipping')==='true';}catch{}
 const escape=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const time=s=>s?new Date(s).toLocaleString('vi-VN'):'Chưa quét';
-const states={new:'Chưa xử lý',shipper:'Đã báo shipper gửi lại hàng',received:'Đã nhận lại hàng'};
 const matchLabels={matched:'Đã khớp Sheet',not_found:'Chưa có trong Sheet',missing_tracking:'Sheet thiếu mã vận đơn',conflict:'Cần kiểm tra Sheet',pending:'Chưa đối chiếu'};
 function toast(text,error=false){$('#toast').textContent=text;$('#toast').className='toast'+(error?' error':'');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('#toast').classList.add('hidden'),6500);}
 async function call(name,...args){try{return await window.srm.call(name,...args);}catch(e){toast(e.message,true);throw e;}}
 function tab(id){document.querySelectorAll('.view').forEach(e=>e.classList.toggle('hidden',e.id!==id));document.querySelectorAll('nav [data-tab]').forEach(e=>e.classList.toggle('active',e.dataset.tab===id));$('#crumb').textContent={orders:'Đơn hoàn / huỷ',profiles:'Profile Shopee',activity:'Lịch sử quét',settings:'Cài đặt kết nối'}[id];}
 function render(snapshot){data=snapshot;const d=data;
   $('#total').textContent=d.orders.length;$('#nav-count').textContent=d.orders.length;
-  for(const s of ['new','shipper','received']) $('#'+s+'-count').textContent=d.orders.filter(o=>o.state===s).length;
   $('#schedule-label').textContent=d.scanning?'Đang đọc dữ liệu Shopee…':d.nextScan?'Lượt tiếp theo · '+time(d.nextScan):'Quét tự động đang tắt';
   $('#scan-all').disabled=d.scanning||d.clearingNotion||d.notionClearPending;
   document.querySelectorAll('[data-clear-notion]').forEach(b=>{b.disabled=d.scanning||d.clearingNotion;b.textContent=d.clearingNotion?'Đang xoá Notion…':d.notionClearPending?'Thử lại xoá Notion':'Xoá dữ liệu Notion';});
@@ -30,10 +28,10 @@ function render(snapshot){data=snapshot;const d=data;
   $('#notion-saved').textContent=d.credentials.notion?'Đã lưu token mã hoá.':'Chưa lưu token.';$('#telegram-saved').textContent=d.credentials.telegram?'Đã lưu token mã hoá.':'Chưa lưu token.';
   renderOrders();
 }
-function renderOrders(){if(!data)return;const search=$('#search').value.toLowerCase();const profile=$('#profile-filter').value;const state=$('#state-filter').value;
-  const orders=data.orders.filter(o=>(!profile||o.profileId===profile)&&(!state||o.state===state)&&[o.orderId,...(o.trackingNumbers||[])].some(v=>v.toLowerCase().includes(search)));
+function renderOrders(){if(!data)return;const search=$('#search').value.toLowerCase();const profile=$('#profile-filter').value;
+  const orders=data.orders.filter(o=>(!profile||o.profileId===profile)&&[o.orderId,...(o.trackingNumbers||[])].some(v=>v.toLowerCase().includes(search)));
   $('#result-count').textContent=orders.length;$('#empty').classList.toggle('hidden',data.orders.length>0);
-  const renderRow=o=>`<tr><td><strong class="order-id">${escape(o.orderId)}</strong><small>${escape(o.profileName)}</small><small>Shopee · ${time(o.lastSeen)}</small></td><td class="tracking-cell">${(o.trackingNumbers||[]).map(n=>`<strong class="order-id">${escape(n)}</strong>`).join('<br>')||'—'}<small class="${o.sheetMatch==='matched'?'match-ok':'match-warn'}">${matchLabels[o.sheetMatch]||matchLabels.pending}</small>${o.sheetStatus?`<small>${escape(o.sheetStatus)}</small>`:''}</td><td><span class="badge ${o.color}">${escape(o.shippingText)}</span>${o.orderStatus?`<small>${escape(o.orderStatus)}</small>`:''}</td><td><span class="process ${o.state}">${states[o.state]}</span></td><td><small>Notion · ${!data.settings.notionEnabled?'Đang tắt':(o.notionSyncedRevision===o.revision&&o.notionVerifiedAt===o.sheetCheckedAt)?'Đã lưu':'Chờ đồng bộ'}</small><small>Telegram · ${!data.settings.telegramEnabled?'Đang tắt':o.telegramSentAt?'Đã gửi':'Chờ gửi'}</small></td><td><div class="actions"><button data-order="${o.id}" data-state="shipper" ${o.state!=='new'?'disabled':''}>Đã báo shipper gửi lại hàng</button><button data-order="${o.id}" data-state="received" ${o.state==='received'?'disabled':''}>Đã nhận lại hàng</button></div></td></tr>`;
+  const renderRow=o=>`<tr><td><strong class="order-id">${escape(o.orderId)}</strong><small>${escape(o.profileName)}</small><small>Shopee · ${time(o.lastSeen)}</small></td><td class="tracking-cell">${(o.trackingNumbers||[]).map(n=>`<strong class="order-id">${escape(n)}</strong>`).join('<br>')||'—'}<small class="${o.sheetMatch==='matched'?'match-ok':'match-warn'}">${matchLabels[o.sheetMatch]||matchLabels.pending}</small>${o.sheetStatus?`<small>${escape(o.sheetStatus)}</small>`:''}</td><td><span class="badge ${o.color}">${escape(o.shippingText)}</span>${o.orderStatus?`<small>${escape(o.orderStatus)}</small>`:''}</td><td><small>Notion · ${!data.settings.notionEnabled?'Đang tắt':(o.notionSyncedRevision===o.revision&&o.notionVerifiedAt===o.sheetCheckedAt)?'Đã có trên Notion':'Chờ kiểm tra'}</small><small>Telegram · ${!data.settings.telegramEnabled?'Đang tắt':o.telegramSentAt?'Đã gửi':'Chờ gửi'}</small></td></tr>`;
   const toggle=$('#group-shipping');
   toggle.setAttribute('aria-pressed',String(groupShipping));
   toggle.classList.toggle('is-active',groupShipping);
@@ -47,10 +45,10 @@ function renderOrders(){if(!data)return;const search=$('#search').value.toLowerC
       groups.get(status).push(order);
     }
     html=[...groups.entries()].sort(([a],[b])=>a.localeCompare(b,'vi')).map(([status,items])=>
-      `<tr class="shipping-group"><th colspan="6"><span class="badge ${items[0].color}">${escape(status)}</span><span class="group-count">${items.length} đơn</span></th></tr>`+items.map(renderRow).join('')
+      `<tr class="shipping-group"><th colspan="4"><span class="badge ${items[0].color}">${escape(status)}</span><span class="group-count">${items.length} đơn</span></th></tr>`+items.map(renderRow).join('')
     ).join('');
   }else html=orders.map(renderRow).join('');
-  $('#order-rows').innerHTML=html||(data.orders.length?'<tr><td colspan="6" class="no-results">Không có đơn khớp bộ lọc.</td></tr>':'');
+  $('#order-rows').innerHTML=html||(data.orders.length?'<tr><td colspan="4" class="no-results">Không có đơn khớp bộ lọc.</td></tr>':'');
 }
 document.addEventListener('click',async e=>{const b=e.target.closest('button');if(!b)return;
   try {if(b.dataset.tab)tab(b.dataset.tab);
@@ -58,8 +56,7 @@ document.addEventListener('click',async e=>{const b=e.target.closest('button');i
     else if(b.dataset.rename){const p=data.profiles.find(p=>p.id===b.dataset.rename);if(!p)return;$('#rename-form').dataset.profileId=p.id;$('#rename-name').value=p.name;$('#rename-error').textContent='';$('#rename-dialog').showModal();$('#rename-name').focus();$('#rename-name').select();}
     else if(b.dataset.login){b.disabled=true;await call('login',b.dataset.login);toast('Đã mở profile. Bạn đăng nhập Shopee trong cửa sổ Chrome.');}
     else if(b.dataset.scan){await call('scan',b.dataset.scan);toast('Lượt quét đã kết thúc. Xem kết quả và nhật ký.');}
-    else if(b.dataset.order){b.disabled=true;await call('order-state',b.dataset.order,b.dataset.state);toast('Đã lưu trạng thái. Notion sẽ đồng bộ khi kết nối đang bật.');}
-  }catch{if(b.dataset.order)renderOrders();}finally{if(b.isConnected&&!b.dataset.order&&!b.dataset.scan)b.disabled=false;}
+  }catch{}finally{if(b.isConnected&&!b.dataset.scan)b.disabled=false;}
 });
 $('#rename-cancel').addEventListener('click',()=>$('#rename-dialog').close());
 $('#rename-form').addEventListener('submit',async e=>{
@@ -71,7 +68,7 @@ $('#rename-form').addEventListener('submit',async e=>{
 $('#rename-dialog').addEventListener('close',()=>{document.querySelector('[data-rename="'+$('#rename-form').dataset.profileId+'"]')?.focus();});
 $('#profile-form').addEventListener('submit',async e=>{e.preventDefault();try{await call('add-profile',$('#profile-name').value);$('#profile-name').value='';toast('Đã thêm profile. Bấm Mở đăng nhập Shopee để đăng nhập.');}catch{}});
 document.addEventListener('change',async e=>{if(e.target.dataset.enable)try{await call('toggle-profile',e.target.dataset.enable,e.target.checked);}catch{}});
-for(const id of ['search','profile-filter','state-filter']) $('#'+id).addEventListener('input',renderOrders);
+for(const id of ['search','profile-filter']) $('#'+id).addEventListener('input',renderOrders);
 $('#group-shipping').addEventListener('click',()=>{
   groupShipping=!groupShipping;
   try{localStorage.setItem('group-shipping',String(groupShipping));}catch{}

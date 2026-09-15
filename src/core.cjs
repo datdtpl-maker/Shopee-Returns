@@ -89,12 +89,6 @@ class Store {
     this.data.sheet={checkedAt:result.checkedAt,rowCount:result.count,matched,conflicts,error:null};this.save();
     return this.data.sheet;
   }
-  setState(id,state) {
-    if(!Object.hasOwn(STATES,state)) throw Error('Trạng thái không hợp lệ.');
-    const o=this.data.orders.find(x=>x.id===id); if(!o) throw Error('Không tìm thấy đơn hàng.');
-    if(!this.isEligible(o))throw Error('Đơn chưa có mã vận đơn khớp chính xác từ lượt quét mới. Hãy quét lại Shopee và Sheet.');
-    if(o.state===state) return o;
-    o.state=state; o.updatedAt=new Date().toISOString(); o.revision++; this.job('notion',`${o.id}:${o.revision}`,{orderKey:id}); this.save(); return o;
-  }
+
 }
 module.exports={Store,STATES};

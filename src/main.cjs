@@ -77,7 +77,6 @@ app.whenReady().then(async()=>{
   handle('login',async id=>{store.profile(id);if(scanning) throw Error('Hãy đợi lượt quét hoàn tất trước khi mở đăng nhập.');await scanner.login(id);store.profile(id).status='Đã mở trình duyệt';store.save();emit();});
   handle('scan',scan);
   handle('refresh-sheet',()=>scan());
-  handle('order-state',(id,state)=>{if(clearingNotion||store.data.notionClearPending)throw Error('Hãy hoàn tất xoá Notion trước.');if(scanning)throw Error('Hãy đợi đối chiếu mới hoàn tất.');const o=store.setState(id,state);store.log('success',`${o.orderId}: đã cập nhật xử lý trong app.`);emit();void integrations.drain().then(emit);});
   handle('settings',async input=>{
     if(clearingNotion)throw Error('Hãy đợi thao tác xoá Notion hoàn tất.');
     if(!input||typeof input!=='object')throw Error('Cài đặt không hợp lệ.');

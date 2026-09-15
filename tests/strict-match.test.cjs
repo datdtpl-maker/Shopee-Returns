@@ -18,9 +18,9 @@ test('exact identifiers do not fold case, match prefixes or accept a placeholder
 });
 test('visibility requires fresh paired reads, survives dedup but not stale cache/restart',t=>{
  const s=setup(t),p=s.addProfile('Shop');s.ingest(p.id,[row]);assert.equal(s.visibleOrders().length,0);
- s.applySheet(valid());assert.equal(s.visibleOrders().length,1);const o=s.data.orders[0];s.setState(o.id,'shipper');
+ s.applySheet(valid());assert.equal(s.visibleOrders().length,1);const o=s.data.orders[0];o.state='shipper';s.save();
  const restarted=new Store(s.dir);assert.equal(restarted.visibleOrders().length,0);restarted.applySheet(valid());assert.equal(restarted.visibleOrders().length,0,'Sheet alone cannot revalidate old Shopee');
- assert.throws(()=>restarted.setState(o.id,'received'),/quét mới/);
+ assert.equal(restarted.setState,undefined);
  restarted.ingest(p.id,[row]);restarted.applySheet(valid());assert.equal(restarted.visibleOrders().length,1);assert.equal(restarted.data.orders[0].state,'shipper');
  assert.equal(restarted.data.jobs.filter(j=>j.kind==='telegram').length,1);
  restarted.currentScans.get(p.id).at=Date.now()-11*60000;assert.equal(restarted.visibleOrders().length,0);

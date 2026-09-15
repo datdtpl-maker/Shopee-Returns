@@ -13,7 +13,7 @@ test('repeat scan, restart and lost local page id never create duplicate or rewr
  o.notionPageId=null;refresh(s);assert.equal(await i.syncOrder(o),'unchanged');assert.equal(remote.mutations,1);
  const reopened=new Store(s.dir);reopened.ingest(o.profileId,[{orderId:o.orderId,shippingText:o.shippingText,color:o.color}]);refresh(reopened);const again=new Integrations(reopened,()=>({}));again.setupNotion=i.setupNotion;again.notion=i.notion;
  assert.equal(await again.syncOrder(reopened.data.orders[0]),'unchanged');assert.equal(remote.pages.length,1);assert.equal(remote.mutations,1);
- s.setState(o.id,'shipper');assert.equal(await i.syncOrder(o),'updated');assert.equal(remote.pages.length,1);assert.equal(remote.mutations,2);
+ o.state='shipper';o.revision++;assert.equal(await i.syncOrder(o),'unchanged');assert.equal(remote.pages.length,1);assert.equal(remote.mutations,1);
  assert.ok(!Object.hasOwn(remote.pages[0].properties,'Mã theo dõi'));assert.ok(!Object.hasOwn(remote.pages[0].properties,'Sheet nguồn'));assert.ok(!Object.hasOwn(remote.pages[0].properties,'Đối chiếu Sheet'));
 });
 test('manual deletion is detected remotely and recreated once despite cached page id',async t=>{
@@ -21,7 +21,7 @@ test('manual deletion is detected remotely and recreated once despite cached pag
  assert.equal(await i.syncOrder(o),'created');assert.equal(remote.pages.filter(p=>!p.archived).length,1);assert.equal(await i.syncOrder(o),'unchanged');
 });
 test('clear backs up rows, verifies empty, resets only Notion and waits for fresh scan',async t=>{
- const {s,i,o}=setup(t),remote=server(i);await i.syncOrder(o);o.telegramSentAt='sent';s.setState(o.id,'received');i.paused=true;
+ const {s,i,o}=setup(t),remote=server(i);await i.syncOrder(o);o.telegramSentAt='sent';o.state='received';s.save();i.paused=true;
  const result=await i.clearNotion();assert.equal(result.archived,1);assert.equal(JSON.parse(fs.readFileSync(result.backup)).pages.length,1);
  assert.equal(s.data.notionClearPending,false);assert.equal(s.data.notionAwaitScan,true);assert.equal(s.visibleOrders().length,0);assert.equal(o.notionPageId,null);assert.equal(o.telegramSentAt,'sent');assert.equal(o.state,'received');
  s.data.settings.notionEnabled=true;i.paused=false;await i.drain();assert.equal(remote.pages.filter(p=>!p.archived).length,0);
@@ -39,7 +39,7 @@ test('query pagination completes before archive mutations',async t=>{
  assert.deepEqual((await i.listPages('db')).map(p=>p.id),['a','b']);
 });
 test('rename preserves account identity, evidence, processing state and notification history',t=>{
- const {s,o}=setup(t),id=o.profileId,key=o.id;s.setState(key,'shipper');o.telegramSentAt='sent';o.notionPageId='linked-page';
+ const {s,o}=setup(t),id=o.profileId,key=o.id;o.state='shipper';o.telegramSentAt='sent';o.notionPageId='linked-page';
  const revision=o.revision;s.renameProfile(id,'  Shop mới  ');
  assert.equal(s.profile(id).name,'Shop mới');assert.equal(o.profileName,'Shop mới');assert.equal(o.id,key);assert.equal(o.profileId,id);
  assert.equal(o.state,'shipper');assert.equal(o.telegramSentAt,'sent');assert.equal(o.notionPageId,'linked-page');assert.equal(s.isEligible(o),true);assert.equal(o.revision,revision+1);
@@ -54,15 +54,39 @@ test('repeated rename and restart reuse Notion row even with missing local link'
  s.renameProfile(o.profileId,'Tên hai');s.renameProfile(o.profileId,'Tên ba');o.notionPageId=null;s.save();
  const restored=new Store(s.dir);restored.ingest(o.profileId,[{orderId:o.orderId,shippingText:o.shippingText,color:o.color}]);refresh(restored);
  const again=new Integrations(restored,()=>({}));again.setupNotion=i.setupNotion;again.notion=i.notion;
- const order=restored.data.orders[0];assert.equal(await again.syncOrder(order),'updated');assert.equal(order.notionPageId,pageId);
- assert.equal(remote.pages.length,1);assert.equal(remote.pages[0].properties.Profile.rich_text[0].text.content,'Tên ba');
- assert.equal(await again.syncOrder(order),'unchanged');assert.equal(remote.mutations,2);
- restored.renameProfile(order.profileId,'Shop');assert.equal(await again.syncOrder(order),'updated');assert.equal(remote.pages.length,1);
+ const order=restored.data.orders[0];assert.equal(await again.syncOrder(order),'unchanged');assert.equal(order.notionPageId,pageId);
+ assert.equal(remote.pages.length,1);assert.equal(remote.pages[0].properties.Profile.rich_text[0].text.content,'Shop');
+ assert.equal(await again.syncOrder(order),'unchanged');assert.equal(remote.mutations,1);
+ restored.renameProfile(order.profileId,'Shop');assert.equal(await again.syncOrder(order),'unchanged');assert.equal(remote.pages.length,1);
 });
 test('renamed profile does not overwrite another shop or create when old/new names conflict',async t=>{
  const {s,i,o}=setup(t),remote=server(i);await i.syncOrder(o);s.renameProfile(o.profileId,'Mới');
  const other=structuredClone(remote.pages[0]);other.id='other';other.properties.Profile.rich_text[0].text.content='Khác';remote.pages.push(other);
- assert.equal(await i.syncOrder(o),'updated');assert.equal(remote.pages.length,2);assert.equal(other.properties.Profile.rich_text[0].text.content,'Khác');
- const duplicate=structuredClone(remote.pages[0]);duplicate.id='duplicate';duplicate.properties.Profile.rich_text[0].text.content='Shop';remote.pages.push(duplicate);
+ assert.equal(await i.syncOrder(o),'unchanged');assert.equal(remote.pages.length,2);assert.equal(other.properties.Profile.rich_text[0].text.content,'Khác');
+ const duplicate=structuredClone(remote.pages[0]);duplicate.id='duplicate';duplicate.properties.Profile.rich_text[0].text.content='Mới';remote.pages.push(duplicate);
  const mutations=remote.mutations;await assert.rejects(i.syncOrder(o),/nhiều bản ghi/);assert.equal(remote.mutations,mutations);
+});
+
+test('downstream edits survive fresh scans, changed raw fields, queued retries and restart',async t=>{
+ const {s,i,o}=setup(t),remote=server(i);await i.syncOrder(o);
+ const page=remote.pages[0];page.properties['Xử lý']={select:{name:'Đã nhận lại hàng'}};
+ page.properties['Ghi chú']={rich_text:[{text:{content:'Dev khác đã xử lý'}}]};
+ page.properties['Mã vận đơn']={rich_text:[{text:{content:'DOWNSTREAM123'}}]};
+ const before=structuredClone(page);o.shippingText='Giao hàng không thành công';o.revision++;s.renameProfile(o.profileId,'Tên mới');
+ refresh(s);s.data.settings.notionEnabled=true;await i.drain();
+ assert.deepEqual(page,before);assert.equal(remote.mutations,1);assert.equal(s.data.jobs.filter(j=>j.kind==='notion'&&j.status==='pending').length,0);
+ const restored=new Store(s.dir);restored.ingest(o.profileId,[{orderId:o.orderId,shippingText:'Đã giao',color:'green'}]);refresh(restored);
+ const again=new Integrations(restored,()=>({}));again.setupNotion=i.setupNotion;again.notion=i.notion;await again.drain();
+ assert.deepEqual(page,before);assert.equal(remote.mutations,1);
+});
+test('every new Notion row starts unprocessed, including legacy states and recreation',async t=>{
+ const {s,i,o}=setup(t),remote=server(i);o.state='received';await i.syncOrder(o);
+ assert.equal(remote.pages[0].properties['Xử lý'].select.name,'Chưa xử lý');
+ remote.pages[0].archived=true;o.state='shipper';refresh(s);await i.syncOrder(o);
+ assert.equal(remote.pages[1].properties['Xử lý'].select.name,'Chưa xử lý');assert.equal(remote.pages.filter(p=>!p.archived).length,1);
+});
+test('lost create response retries by lookup without rewriting the created row',async t=>{
+ const {i,o}=setup(t),remote=server(i),original=i.notion;let fail=true;
+ i.notion=async(...args)=>{const result=await original(...args);if(args[0]==='pages'&&fail){fail=false;throw Error('response lost');}return result;};
+ await assert.rejects(i.syncOrder(o),/response lost/);assert.equal(await i.syncOrder(o),'unchanged');assert.equal(remote.pages.length,1);assert.equal(remote.mutations,1);
 });

@@ -60,23 +60,17 @@ class Integrations {
     const verifiedAt=order.sheetCheckedAt;
     const properties={
       'Mã đơn hàng':{title:rich(order.orderId)},'Profile':{rich_text:rich(order.profileName)},
-      'Vận chuyển chiều giao hàng':{rich_text:rich(order.shippingText)},'Màu':{select:{name:order.color==='red'?'Đỏ':'Xanh'}},'Xử lý':{select:{name:STATES[order.state]}},
+      'Vận chuyển chiều giao hàng':{rich_text:rich(order.shippingText)},'Màu':{select:{name:order.color==='red'?'Đỏ':'Xanh'}},'Xử lý':{select:{name:STATES.new}},
       'Mã vận đơn':{rich_text:rich((order.trackingNumbers||[]).join(' | '))},'Tình trạng Sheet':{rich_text:rich(order.sheetStatus||'')},
       'Trạng thái Shopee':{rich_text:rich(order.orderStatus||'')},
       'Kiểm tra Sheet lúc':{date:order.sheetCheckedAt?{start:order.sheetCheckedAt}:null},
       'Phát hiện lúc':{date:{start:order.firstSeen}},'Cập nhật lúc':{date:{start:[order.updatedAt,order.lastSeen,order.sheetCheckedAt].filter(Boolean).sort().at(-1)}}
     };
     if(!this.store.isEligible(order))throw Error('Kết quả đối chiếu đã hết hạn; cần quét lại.');
-    const changed=!found||Object.entries(properties).some(([name,value])=>{
-      if(value.date)return false; // A new scan timestamp alone must not rewrite an existing row.
-      if(value.title)return plain(found.properties?.[name],'title')!==value.title.map(t=>t.text.content).join('');
-      if(value.rich_text)return plain(found.properties?.[name],'rich_text')!==value.rich_text.map(t=>t.text.content).join('');
-      if(value.select)return found.properties?.[name]?.select?.name!==value.select.name;
-      return false;
-    });
-    const page=!changed?found:order.notionPageId?await this.notion('pages/'+order.notionPageId,'PATCH',{properties}):await this.notion('pages','POST',{parent:{database_id:db},properties});
+    // Existing rows belong to the downstream processing tool. Never overwrite any field.
+    const page=found||await this.notion('pages','POST',{parent:{database_id:db},properties});
     order.notionPageId=page.id;order.notionSyncedAt=new Date().toISOString();order.notionSyncedRevision=revision;order.notionVerifiedAt=verifiedAt;this.store.save();
-    return !changed?'unchanged':found?'updated':'created';
+    return found?'unchanged':'created';
   }
   async listPages(db,filter) {
     const pages=[];let cursor;
@@ -113,7 +107,7 @@ class Integrations {
     if(!this.store.isEligible(order))throw Error('Đơn chưa được đối chiếu hợp lệ trong lượt quét mới.');
     const s=this.store.data.settings;const token=this.secrets().telegramToken;
     if(!token||!s.chatId) throw Error('Chưa có Telegram Bot Token hoặc Chat ID.');
-    await this.request(`https://api.telegram.org/bot${token}/sendMessage`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chat_id:s.chatId,text:`SHOPEE · ĐƠN HOÀN / HUỶ\nTài khoản: ${order.profileName}\nMã đơn: ${order.orderId}\nMã vận đơn: ${(order.trackingNumbers||[]).join(' | ')||'Chưa khớp Sheet'}\nVận chuyển chiều giao hàng: ${order.shippingText}\nTrạng thái Shopee: ${order.orderStatus||'—'}\nXử lý: ${STATES[order.state]}`,link_preview_options:{is_disabled:true}})});
+    await this.request(`https://api.telegram.org/bot${token}/sendMessage`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chat_id:s.chatId,text:`SHOPEE · ĐƠN HOÀN / HUỶ\nTài khoản: ${order.profileName}\nMã đơn: ${order.orderId}\nMã vận đơn: ${(order.trackingNumbers||[]).join(' | ')||'Chưa khớp Sheet'}\nVận chuyển chiều giao hàng: ${order.shippingText}\nTrạng thái Shopee: ${order.orderStatus||'—'}`,link_preview_options:{is_disabled:true}})});
     order.telegramSentAt=new Date().toISOString();this.store.save();
   }
   async drain() {

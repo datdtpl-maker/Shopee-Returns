@@ -10,3 +10,5 @@
 button.danger-button{color:var(--red);border:1px solid #e7b5b9;background:var(--red-bg)}button.danger-button:hover{background:#ffe0e3}.connection-strip button.danger-button{margin-left:0;border:1px solid #e7b5b9;padding:9px 13px;min-height:44px}
 
 .profile-top>div:nth-child(2){min-width:0}.profile-top h2{overflow-wrap:anywhere}.profile-avatar{flex-shrink:0}#rename-dialog{width:440px;max-width:calc(100vw - 32px);border:1px solid var(--border);border-radius:var(--radius);padding:26px;color:var(--text);box-shadow:0 20px 80px #0003}#rename-dialog::backdrop{background:#17242e66}#rename-title{font-size:20px}#rename-help{font-size:13px;margin:10px 0 22px}#rename-form label{display:block;font-size:13px;margin-bottom:8px}#rename-name{width:100%}#rename-error{font-size:13px;color:var(--red);margin:10px 0;min-height:20px}#rename-form .button-row{justify-content:flex-end}#rename-form button{font-size:14px}
+
+.stats{grid-template-columns:minmax(0,360px)}.table-wrap table{min-width:760px}
