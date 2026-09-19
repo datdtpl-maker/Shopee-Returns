@@ -54,7 +54,7 @@ Telegram đang **tắt** để test trong app. Khi cần, nhập Bot Token và C
 
 ## Phát triển và kiểm thử
 
-Node.js 24, Electron 40, Playwright; Chrome hoặc Edge cài trên máy.
+Node.js 24, Electron 44.3.0, Playwright; Chrome hoặc Edge cài trên máy.
 
 ```powershell
 npm ci
@@ -66,8 +66,39 @@ npm start
 
 Kiểm thử UI dùng thư mục dữ liệu tạm, không thay trạng thái các đơn thật. Không cần server công khai hay cổng localhost cho giao diện; renderer gọi các thao tác giới hạn qua Electron IPC.
 
-Chưa đóng gói installer. Bản chạy trực tiếp dùng `Start.cmd`.
+Bộ cài Windows x64 tạo bằng `npm run build:win`. Bản chạy mã nguồn vẫn dùng `Start.cmd`.
 
 ### Bàn giao dữ liệu cho tool xử lý
 
-Tool này là nguồn cấp dữ liệu thô, chỉ tạo bản ghi mới. Tool nhận dữ liệu có thể đọc và thay đổi Xử lý hoặc bổ sung trường riêng. Không chạy nhiều bản sao tool quét cùng lúc vào một bảng: Notion không có ràng buộc duy nhất/giao dịch tạo-if-absent, nên hai máy đồng thời có thể tạo trùng. Nút Xoá dữ liệu Notion vẫn là thao tác riêng có xác nhận, có thể xoá cả dữ liệu đã được tool khác xử lý.
+Module hoàn huỷ là nguồn cấp dữ liệu thô, chỉ tạo bản ghi mới. Tool nhận dữ liệu có thể đọc và thay đổi Xử lý hoặc bổ sung trường riêng. Không chạy nhiều bản sao tool quét cùng lúc vào một bảng: Notion không có ràng buộc duy nhất/giao dịch tạo-if-absent, nên hai máy đồng thời có thể tạo trùng. Nút Xoá dữ liệu Notion vẫn là thao tác riêng có xác nhận, có thể xoá cả dữ liệu đã được tool khác xử lý.
+
+## Module 2 — Sản phẩm, giá bán và tồn kho (1.2.0)
+
+1. Mở **Sản phẩm**, chọn shop hoặc tất cả profile đang bật, bấm **Quét Shopee → Notion**. Tool dùng phiên đăng nhập hiện có, chọn 48/trang, cuộn đọc giá/tồn kho và đi qua toàn bộ trang đang hoạt động. Chỉ nhận lượt quét đủ số sản phẩm, đúng shop, không trùng ID. Tồn kho rút gọn như 200k được đọc chính xác trong hộp tồn kho rồi huỷ hộp.
+2. Bảng **Kho sản phẩm Shopee** nằm trong trang Notion `3e070655a9aa80d68197fb688ad8e289`; dùng token đã nhập ở Cài đặt. Integration phải có quyền trang này. Bảng có Tên shop, Tên sản phẩm, Giá bán, Kho hàng và các trường ID sản phẩm, Model ID, Phân loại, Quét lúc để đối chiếu. Mỗi phân loại là một dòng. Khoá chống trùng là tên tài khoản shop + ID sản phẩm + Model ID; tên profile chỉ là nhãn cục bộ.
+3. **Tải dữ liệu Notion** để xem dữ liệu bảng; **Sửa giá / Sửa kho → Lưu lên Shopee** để thực hiện thay đổi. Tool tìm bằng ID, đối chiếu tài khoản, tên sản phẩm, phân loại và giá trị gốc; chỉ sửa ô được chọn, lưu một lần rồi mở lại kiểm tra. Nếu giá khuyến mãi khác giá gốc trong hộp sửa, nhiều kho không xác định được hoặc dữ liệu đã đổi, tool dừng và báo lỗi.
+4. Giá/kho được cập nhật lên **bảng sản phẩm** khi khác dữ liệu cũ, không tạo thêm dòng trùng. Các cột khác do người quản lý thêm được giữ lại. `Quét lúc` ghi thời điểm nguồn của lần ghi dữ liệu; dòng không đổi không được ghi lại. Notion là bản chụp tại lần quét, không phải luồng tồn kho liên tục. Sửa trực tiếp Notion không tự sửa Shopee.
+5. Nếu Shopee đã lưu nhưng Notion lỗi, bấm **Đồng bộ lại** để chỉ thử ghi Notion. Nếu mất kết nối sau khi gửi lệnh lưu Shopee, tool không tự gửi lại; quét lại shop để xác minh trước khi sửa tiếp. Nhật ký và dữ liệu sản phẩm lưu riêng tại `data/products.json`. Máy mới cần quét shop một lần để liên kết profile với tên tài khoản thật.
+6. Trình duyệt vẫn mở sau thao tác. Hai module dùng khoá thao tác để không điều hướng chồng nhau: lịch hoàn huỷ giữ nguyên, nếu đến hạn lúc module 2 đang chạy sẽ chạy ngay khi thao tác xong. Nút **Xoá dữ liệu Notion** hiện có chỉ áp dụng bảng hoàn huỷ; không xoá bảng sản phẩm. Module sản phẩm chạy khi bấm nút, không thêm lịch tự động mới.
+
+Kiểm thử riêng giao diện sản phẩm và lịch chờ: `node tests/products-ui.cjs`. Không thử đổi giá/kho thật nếu chưa có giá trị cụ thể được người vận hành yêu cầu. Chỉ chạy một máy ghi vào cùng bảng Notion để tránh tranh chấp giữa máy.
+
+### Sửa hàng loạt (1.3.0)
+
+1. Lọc shop / tên sản phẩm rồi bấm **Sửa hàng loạt**. Nhập giá mới, kho mới hoặc cả hai cho từng dòng. Ô trống giữ nguyên; kho bằng 0 là hợp lệ. Đóng hộp vẫn giữ bản nháp trên máy, có thể đổi bộ lọc để nhập thêm sản phẩm khác.
+2. Bấm **Xem thay đổi** để xem tất cả bản nháp (kể cả sản phẩm ngoài bộ lọc hiện tại), đối chiếu shop, phân loại, giá trị cũ/mới, rồi bấm **Chạy N thay đổi**. Chỉ lúc này tool mới sửa Shopee. Tối đa 1.000 thay đổi mỗi lượt.
+3. Tool chạy lần lượt, xác minh và đồng bộ từng trường; một sản phẩm sửa cả giá và kho là hai thay đổi. Mục lỗi được ghi riêng, các mục độc lập vẫn tiếp tục. Nếu một thao tác chưa xác minh được sau khi gửi Shopee, các mục còn lại của sản phẩm đó không được gửi; quét lại shop trước khi sửa tiếp.
+4. **Dừng sau mục hiện tại** chờ mục đang thực hiện xong, bỏ qua các mục chưa chạy. Không hoàn tác các mục đã lưu. Kết quả lượt gần nhất được lưu tại `data/products.json`; mở lại app không tự chạy lại các lệnh dở. Bản nháp lưu trong dữ liệu Electron cục bộ, không chứa token.
+5. Lịch hoàn huỷ đợi toàn bộ lượt sửa kết thúc/dừng rồi chạy ngay nếu đã đến hạn. Profile vẫn mở. Nếu Shopee đã lưu nhưng Notion lỗi, dùng **Đồng bộ lại**, không chạy lại lệnh sửa Shopee.
+
+Kiểm thử giao diện hàng loạt: `node tests/product-batch-ui.cjs` (dữ liệu giả, không sửa shop thật).
+
+## Bộ cài Windows và dữ liệu lâu dài (1.1.0)
+
+- Cài file Shopee-Returns-Setup-1.1.0-x64.exe. Không cần Node.js; cần Chrome hoặc Microsoft Edge.
+- Bản cài lưu toàn bộ dữ liệu dưới %APPDATA%\ShopeeReturns: data/state.json, data/credentials.enc, data/profiles và electron (khoá mã hoá/trạng thái Electron). Không lưu dữ liệu trong thư mục chương trình.
+- Cài bản mới đè lên bản cũ, cùng tài khoản Windows, giữ appId và đường dẫn dữ liệu. Đóng app hoàn toàn qua khay hệ thống trước khi cập nhật. Không xoá %APPDATA%\ShopeeReturns. Sao lưu cả thư mục này khi app và browser đã đóng. Chuyển sang máy/tài khoản khác cần nhập lại token và đăng nhập Shopee.
+- Cài đặt → Nhập file cấu hình: JSON chỉ nhận các trường notionToken, telegramToken, chatId, notionPageId, notionDatabaseId, sheetUrl, intervalMinutes, autoScan, notionEnabled, telegramEnabled, startWithWindows, keepAwake, closeToTray. Token lưu mã hoá bằng safeStorage tại máy nhận. File nhập chứa token dạng đọc được, cất riêng và không đưa lên repo.
+- Bật autoScan và keepAwake để giữ app hoạt động khi màn hình tắt; closeToTray để nút X chỉ ẩn cửa sổ; startWithWindows để mở lại sau khi đăng nhập Windows. App không phải Windows Service và không quét khi máy tắt, ngủ thủ công, đăng xuất hoặc chưa đăng nhập Windows.
+- Chỉ chạy một máy quét vào cùng bảng Notion tại một thời điểm. Chưa có khoá phân tán giữa các bản cài.
+- Bộ cài chưa có chữ ký số; Windows có thể hiển thị cảnh báo nhà phát hành chưa xác định. Không có cập nhật tự động: chạy bộ cài phiên bản mới để cập nhật.

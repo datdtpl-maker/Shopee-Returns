@@ -37,7 +37,7 @@ const {_electron}=require('playwright');const assert=require('node:assert/strict
   await page.locator('#group-shipping').click();
   await page.locator('#search').fill('SPXVN0123456789');assert.equal(await page.locator('#order-rows tr:not(.shipping-group)').count(),1);await page.locator('#search').fill('');
   assert.equal(await page.locator('[data-order],#state-filter,.process').count(),0);
-  assert.equal(await page.locator('thead th').count(),4);
+  assert.equal(await page.locator('#orders thead th').count(),4);
   assert.equal(await page.evaluate(()=>window.srm.call('order-state','any','received').then(()=>false).catch(()=>true)),true);
   await page.locator('nav [data-tab="profiles"]').click();
   await page.getByRole('button',{name:'Sửa tên',exact:true}).click();
@@ -59,7 +59,7 @@ const {_electron}=require('playwright');const assert=require('node:assert/strict
   const validation=await page.evaluate(()=>window.srm.call('settings',{intervalMinutes:0}).then(()=>false).catch(()=>true));assert.equal(validation,true);
   for(const width of [1440,780,390]) {
     await app.evaluate(({BrowserWindow},w)=>{const win=BrowserWindow.getAllWindows()[0];win.setMinimumSize(360,500);win.setSize(w,900);},width);
-    for(const view of ['orders','profiles','settings','activity']){
+    for(const view of ['orders','products','profiles','settings','activity']){
       await page.locator(`nav [data-tab="${view}"]`).click();
       assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`page overflow: ${view} ${width}`);
     }
