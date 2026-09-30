@@ -8,12 +8,14 @@ function filteredBatchRows(){
  return data.products.rows.filter(r=>(!profile||r.profileId===profile)&&[r.name,r.variant,r.productId,r.modelId,r.shop].join(' ').toLocaleLowerCase('vi').includes(q));
 }
 function renderBatchState(){
+ const batch=data.products.batch;let reconciled=false;
+ for(const item of batch?.items||[]){const k=batchDraftKey(item.id,item.field),d=batchDrafts[k];if(d?.submittedRequestId===batch.id&&Number(d.value)===item.value&&['verified','notion-pending'].includes(item.status)){delete batchDrafts[k];reconciled=true;}}
+ if(reconciled)saveBatchDrafts();
  const busy=data.products.busy||data.scanning||data.clearingNotion;
  $('#products-bulk').disabled=busy;
  $('#products-bulk').textContent='Sửa hàng loạt'+(Object.keys(batchDrafts).length?' · '+Object.keys(batchDrafts).length+' bản nháp':'');
  $('#batch-run').disabled=busy||batchSubmitting;
  $('#batch-close').disabled=batchSubmitting;
- const batch=data.products.batch;
  $('#batch-results').hidden=!batch;if(!batch)return;
  const labels={queued:'Chờ chạy',running:'Đang thực hiện',verified:'Đã lưu và xác minh','notion-pending':'Shopee đã lưu · Notion chờ ghi',failed:'Không thực hiện',uncertain:'Chưa xác minh · quét lại trước khi sửa',cancelled:'Chưa chạy',reconciled:'Đã quét kiểm tra lại'};
  const done=batch.items.filter(i=>!['queued','running'].includes(i.status)).length;
@@ -30,7 +32,7 @@ function openBulk(){
  const rows=filteredBatchRows();
  $('#batch-entry-rows').innerHTML=rows.map(r=>'<tr><td>'+escape(r.shop)+'<strong>'+escape(r.name)+'</strong><small>'+escape(r.variant||'Không phân loại')+' · ID '+escape(r.productId)+' · Model '+escape(r.modelId)+'</small>'+(!r.profileId?'<small>Chưa liên kết profile: tải dữ liệu Notion trước.</small>':'')+'</td>'+['price','stock'].map(field=>{
   const draft=batchDrafts[batchDraftKey(r.id,field)];
-  return '<td><label><span>'+(field==='price'?'Giá mới (VND)':'Kho mới')+'</span><input type="number" step="1" min="'+(field==='price'?1:0)+'" max="1000000000" data-batch-id="'+escape(r.id)+'" data-batch-field="'+field+'" aria-label="'+escape((field==='price'?'Giá mới: ':'Kho mới: ')+r.name+' '+r.variant)+'" placeholder="Giữ nguyên" value="'+escape(draft?.value??'')+'" '+(!r.profileId?'disabled':'')+'></label><small>Hiện tại: '+escape(field==='price'?productMoney(r.price):r.stock)+'</small></td>';
+  return '<td><label><span>'+(field==='price'?'Giá mới (VND)':'Kho mới')+'</span><input type="number" step="1" min="'+(field==='price'?1:0)+'" max="1000000000" data-batch-id="'+escape(r.id)+'" data-batch-field="'+field+'" aria-label="'+escape((field==='price'?'Giá mới: ':'Kho mới: ')+r.name+' '+r.variant)+'" placeholder="Giữ nguyên" value="'+escape(draft?.value??'')+'" '+(!r.profileId?'disabled':'')+'></label><small>Lần đọc trước: '+escape(field==='price'?productMoney(r.price):r.stock)+'</small></td>';
  }).join('')+'</tr>').join('')||'<tr><td colspan="3">Không có sản phẩm khớp bộ lọc.</td></tr>';
  batchCount();$('#batch-dialog').showModal();
 }
@@ -40,7 +42,7 @@ $('#batch-clear').addEventListener('click',()=>{batchDrafts={};saveBatchDrafts()
 $('#batch-entry-rows').addEventListener('input',e=>{
  const input=e.target;if(!input.dataset.batchId)return;
  const row=data.products.rows.find(r=>r.id===input.dataset.batchId),field=input.dataset.batchField,k=batchDraftKey(row.id,field);
- if(input.value===''||Number(input.value)===row[field])delete batchDrafts[k];
+ if(input.value==='')delete batchDrafts[k];
  else batchDrafts[k]={id:row.id,field,expected:batchDrafts[k]?.expected??row[field],value:input.value,shop:row.shop,name:row.name,variant:row.variant,productId:row.productId,modelId:row.modelId};
  saveBatchDrafts();batchCount();
 });
@@ -50,8 +52,7 @@ $('#batch-entry').addEventListener('submit',e=>{
   if(!drafts.length)throw Error('Nhập ít nhất một giá hoặc tồn kho mới. Ô để trống sẽ giữ nguyên.');
   batchReview=drafts.map(d=>{
    const row=data.products.rows.find(r=>r.id===d.id),value=Number(d.value);
-   if(!row?.profileId||row.shop!==d.shop||row.productId!==d.productId||row.modelId!==d.modelId)throw Error('Bản nháp không còn khớp dữ liệu: '+d.name+'. Xoá bản nháp rồi nhập lại.');
-   if(row[d.field]!==d.expected)throw Error('Giá/kho đã thay đổi: '+d.name+'. Xoá bản nháp rồi nhập lại.');
+   if(!row?.profileId||row.shop!==d.shop||row.productId!==d.productId||row.modelId!==d.modelId||row.name!==d.name||row.variant!==d.variant)throw Error('Bản nháp không còn khớp dữ liệu: '+d.name+'. Xoá bản nháp rồi nhập lại.');
    if(!['price','stock'].includes(d.field)||!Number.isSafeInteger(value)||value<(d.field==='price'?1:0)||value>1000000000)throw Error('Giá/kho không hợp lệ: '+d.name);
    return {...d,value};
   });
@@ -63,19 +64,20 @@ $('#batch-back').addEventListener('click',()=>{$('#batch-entry').hidden=false;$(
 $('#batch-run').addEventListener('click',async()=>{
  if(batchSubmitting||!batchReview)return;batchSubmitting=true;renderBatchState();const submitted=batchReview.map(r=>({...r}));
  const requestId=crypto.randomUUID();
+ for(const i of submitted){const draft=batchDrafts[batchDraftKey(i.id,i.field)];if(draft)draft.submittedRequestId=requestId;}saveBatchDrafts();
  try{
   const result=await window.srm.call('products-edit-batch',{requestId,items:submitted.map(({id,field,expected,value})=>({id,field,expected,value}))});
-  for(const i of submitted)delete batchDrafts[batchDraftKey(i.id,i.field)];saveBatchDrafts();$('#batch-dialog').close();
+  for(const i of result.items){const k=batchDraftKey(i.id,i.field);if(batchDrafts[k]?.submittedRequestId===requestId&&['verified','notion-pending'].includes(i.status))delete batchDrafts[k];}saveBatchDrafts();$('#batch-dialog').close();
   const failed=result.items.filter(i=>['failed','uncertain','cancelled'].includes(i.status)).length;
   toast('Lượt sửa đã kết thúc. '+(failed?failed+' mục chưa hoàn tất; xem Kết quả sửa hàng loạt.':'Xem kết quả từng mục bên dưới.'),!!failed);
  }catch(error){$('#batch-error').textContent=error.message;if(!$('#batch-dialog').open)toast(error.message,true);}
  finally{batchSubmitting=false;renderBatchState();}
 });
-// Close the editor as soon as the server accepts the run. Live results are on
-// the product screen, and reopening the app never replays a submitted list.
+// Results remain visible while running. Keep unsuccessful requests as drafts;
+// they are only retried after the operator reviews and runs a new batch.
 window.srm.subscribe(snapshot=>{
  if(batchSubmitting&&snapshot.products.batch?.status==='running'&&$('#batch-dialog').open){
-  for(const i of batchReview||[])delete batchDrafts[batchDraftKey(i.id,i.field)];saveBatchDrafts();$('#batch-dialog').close();
+  $('#batch-dialog').close();
  }
 });
 $('#batch-dialog').addEventListener('cancel',e=>{if(batchSubmitting)e.preventDefault();});

@@ -68,7 +68,7 @@ function readVisibleRows() {
 }
 
 class Scanner {
-  constructor(dir) {this.dir=dir;this.contexts=new Map();this.busy=new Set();}
+  constructor(dir,monitor=null) {this.dir=dir;this.monitor=monitor;this.contexts=new Map();this.busy=new Set();}
   async context(id) {
     if(this.contexts.has(id)) return this.contexts.get(id);
     const userDataDir=path.join(this.dir,'profiles',id);fs.mkdirSync(userDataDir,{recursive:true});
@@ -80,8 +80,9 @@ class Scanner {
   async login(id) {const ctx=await this.context(id);const page=ctx.pages()[0]||await ctx.newPage();await page.goto(HOME,{waitUntil:'domcontentloaded',timeout:60000});await page.bringToFront();}
   async scan(id) {
     if(this.busy.has(id)) throw Error('Profile đang được quét.'); this.busy.add(id);
+    let page;
     try {
-      const ctx=await this.context(id); const page=ctx.pages()[0]||await ctx.newPage();
+      const ctx=await this.context(id); page=ctx.pages()[0]||await ctx.newPage();
       const cacheControl=await ctx.newCDPSession(page);
       await cacheControl.send('Network.enable');await cacheControl.send('Network.setCacheDisabled',{cacheDisabled:true});
       await cacheControl.send('Network.setBypassServiceWorker',{bypass:true});
@@ -95,12 +96,12 @@ class Scanner {
         return !!ready||empty;
       },null,{timeout:45000});}catch{throw Error('Shopee chưa tải xong danh sách. Không ghi kết quả 0 khi trang còn tải hoặc lỗi.');}
       let deadline;
-      try {return await Promise.race([this.collect(page),new Promise((_,reject)=>{deadline=setTimeout(()=>{void page.close().catch(()=>{});reject(Error('Quét quá 120 giây. Đã dừng lượt này; hãy mở lại profile và thử lại.'));},120000);})]);}
+      try {return await Promise.race([this.collect(page,id),new Promise((_,reject)=>{deadline=setTimeout(()=>{void page.close().catch(()=>{});reject(Error('Quét quá 120 giây. Đã dừng lượt này; hãy mở lại profile và thử lại.'));},120000);})]);}
       finally{clearTimeout(deadline);}
       } finally {await cacheControl.detach().catch(()=>{});}
-    } finally {this.busy.delete(id);}
+    } catch(e){await this.monitor?.failure(id,'returns','list',page,e);throw e;} finally {this.busy.delete(id);}
   }
-  async collect(page) {
+  async collect(page,profileId) {
     const seen=new Map(),allIds=new Set(),ignored=new Set(),unresolvedIds=new Set();let stable=0;let lastSignature='';let unresolved=0;let sample;
     // Scroll only ancestors of the actual table. Shopee also has resize-detector scroll elements.
     const scrollPage=reset=>{
@@ -113,6 +114,7 @@ class Scanner {
     for(let step=0;step<160;step++) {
       await page.waitForTimeout(450);
       sample=await page.evaluate(readVisibleRows);
+      if(this.monitor&&profileId)await this.monitor.check(profileId,'returns','list',page);
       if(!sample.heading) throw Error('Không tìm thấy cột Vận chuyển chiều giao hàng.');
       unresolved=Math.max(unresolved,sample.unresolved);
       for(const id of sample.allIds||[])allIds.add(id);

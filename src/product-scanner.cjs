@@ -36,7 +36,7 @@ function validateEdit(input){
   return {field:input.field,value:input.value,expected:input.expected};
 }
 class ProductScanner{
-  constructor(scanner){this.scanner=scanner;this.pages=new Map();}
+  constructor(scanner){this.scanner=scanner;this.monitor=scanner.monitor;this.pages=new Map();}
   async dialogInput(page,dialog,field,variant){
     if(await dialog.count()!==1)throw Error('Không xác định được hộp sửa duy nhất.');
     let scope=dialog;
@@ -51,13 +51,21 @@ class ProductScanner{
     await input.scrollIntoViewIfNeeded();return input;
   }
   async open(profileId){
-    const ctx=await this.scanner.context(profileId);let page=this.pages.get(profileId);
+    let page;
+    try{
+    const ctx=await this.scanner.context(profileId);page=this.pages.get(profileId);
     if(!page||page.isClosed()){page=await ctx.newPage();page.setDefaultTimeout(15000);this.pages.set(profileId,page);}
     const cdp=await ctx.newCDPSession(page);try{await cdp.send('Network.enable');await cdp.send('Network.setCacheDisabled',{cacheDisabled:true});await cdp.send('Network.setBypassServiceWorker',{bypass:true});}finally{await cdp.detach();}
     await page.goto(URL,{waitUntil:'domcontentloaded',timeout:60000});
     const skip=page.getByRole('button',{name:'Bỏ qua',exact:true});if(await skip.isVisible().catch(()=>false))await skip.click();
     await page.locator('.product-list-pagination').waitFor({timeout:45000});
+    await page.waitForFunction(()=>document.querySelector('.product-variation-item .item-id')||/^0\s+sản phẩm$/i.test(document.querySelector('.list-header-title')?.textContent.trim()||''),null,{timeout:30000});
+    // Shopee mounts the filter/search panel after the product table. Wait for
+    // this separate component so an ordinary lazy load is not a drift alert.
+    await page.getByPlaceholder('Tìm Tên sản phẩm, SKU sản phẩm, SKU phân loại, Mã sản phẩm',{exact:true}).waitFor({timeout:20000});
+    await this.monitor?.check(profileId,'products','list',page);
     return page;
+    }catch(e){await this.monitor?.failure(profileId,'products','list',page,e);throw e;}
   }
   async shop(profileId){
     const page=await this.open(profileId);
@@ -91,21 +99,27 @@ class ProductScanner{
     }
     const deadline=Date.now()+20000;let d;do{d=await page.evaluate(readProducts);if(!d.errors.length)return d;await page.waitForTimeout(250);}while(Date.now()<deadline);throw Error(d.errors.slice(0,3).join(' · '));
   }
-  async size48(page){
+  async size48(page,profileId){
     const select=page.locator('.product-list-pagination .eds-pagination-sizes__content');await select.scrollIntoViewIfNeeded();
     if(!(await select.innerText()).includes('48/')){
-      await select.click();await page.locator('.eds-pagination-sizes__popper:visible .eds-dropdown-item').filter({hasText:/^48$/}).click();
+      await select.click();
+      if(this.monitor){await page.locator('.eds-pagination-sizes__popper:visible .eds-dropdown-item').first().waitFor();await this.monitor.check(profileId,'products','page-size',page);}
+      await page.locator('.eds-pagination-sizes__popper:visible .eds-dropdown-item').filter({hasText:/^48$/}).click();
       await page.waitForFunction(()=>document.querySelector('.eds-pagination-sizes__content')?.textContent.includes('48/'));
     }
   }
   async scan(profileId,progress=()=>{}){
-    const page=await this.open(profileId);await this.size48(page);
+    try{return await this.collectProducts(profileId,progress);}catch(e){await this.monitor?.failure(profileId,'products','list',this.pages.get(profileId),e,{deep:/Thiếu giá\/kho\/Model ID/.test(e.message)});throw e;}
+  }
+  async collectProducts(profileId,progress=()=>{}){
+    const page=await this.open(profileId);await this.size48(page,profileId);
     // Reloading list should begin at page 1; explicitly return if Shopee remembered another page.
     while(Number(await page.locator('.eds-pager__current').innerText())>1){const old=await page.locator('.eds-pager__current').innerText();await page.locator('.eds-pager__button-prev').click();await page.waitForFunction(old=>document.querySelector('.eds-pager__current')?.textContent!==old,old);}
     const rows=[],seen=new Set();let expectedTotal,shop,pages;const deadline=Date.now()+15*60000;
     for(let index=1;index<=500;index++){
       if(Date.now()>deadline)throw Error('Quét sản phẩm vượt 15 phút. Chưa ghi lượt quét dở lên Notion.');
       const d=await this.ready(page);
+      await this.monitor?.check(profileId,'products','list',page,{deep:true});
       if(d.page!==index||!d.size.includes('48/')||!d.shop||d.total===null||d.errors.length)throw Error('Không xác nhận được trang, shop hoặc dữ liệu sản phẩm đầy đủ.');
       if(index===1){expectedTotal=d.total;shop=d.shop;pages=d.pages;}
       if(d.shop!==shop||d.total!==expectedTotal||d.pages!==pages)throw Error('Danh sách thay đổi trong lúc quét. Hãy quét lại để tránh thiếu sản phẩm.');
@@ -121,13 +135,16 @@ class ProductScanner{
     return {shop,rows,total:seen.size,pages,scannedAt:new Date().toISOString()};
   }
   async find(profileId,target){
+    try{return await this.locate(profileId,target);}catch(e){if(e.name==='TimeoutError')await this.monitor?.failure(profileId,'products','list',this.pages.get(profileId),e);throw e;}
+  }
+  async locate(profileId,target){
     const page=await this.open(profileId);
     const shop=await page.locator('.account-info .subaccount-name').first().innerText();
     if(normal(shop)!==target.shop)throw Error('Profile đang đăng nhập shop khác. Không sửa sản phẩm.');
     const search=page.getByPlaceholder('Tìm Tên sản phẩm, SKU sản phẩm, SKU phân loại, Mã sản phẩm',{exact:true});
     await search.fill(target.productId);await search.press('Enter');
     await page.waitForFunction(id=>{const ids=[...document.querySelectorAll('.product-variation-item .item-id')];return ids.length===1&&ids[0].textContent.trim()==='ID Sản phẩm: '+id;},target.productId,{timeout:30000});
-    const d=await this.ready(page);const row=d.rows.find(r=>r.productId===target.productId&&r.modelId===target.modelId);
+    const d=await this.ready(page);await this.monitor?.check(profileId,'products','list',page,{deep:true});const row=d.rows.find(r=>r.productId===target.productId&&r.modelId===target.modelId);
     if(!row||normal(row.name)!==normal(target.name)||normal(row.variant)!==normal(target.variant))throw Error('Tên hoặc phân loại đã thay đổi. Quét lại sản phẩm trước khi sửa.');
     const container=page.locator('tr.eds-table__row').filter({has:page.locator('.item-id').filter({hasText:new RegExp('^ID Sản phẩm: '+target.productId+'$')})});
     const unit=target.variant?container.locator('.model-list-item').filter({has:page.locator('.variation-name-info-sku').filter({hasText:new RegExp('^Model ID:\\s*'+target.modelId+'\\s*$')})}):container.locator('.product-variation-item');
@@ -136,33 +153,39 @@ class ProductScanner{
   }
   async edit(profileId,target,input,{dryRun=false,beforeSubmit=()=>{}}={}){
     const edit=validateEdit(input);const {page,row,unit}=await this.find(profileId,target);
-    if(row[edit.field]!==edit.expected)throw Error('Giá/tồn kho trên Shopee đã thay đổi ('+row[edit.field]+'). Quét lại trước khi sửa.');
+    // This is an absolute set, so the cached Notion value is audit context.
+    // The fresh Shopee read is the baseline used to guard the actual dialog.
+    const liveExpected=row[edit.field];
+    if(!Number.isSafeInteger(liveExpected)||liveExpected<0)throw Error('Không đọc được giá/kho mới nhất từ Shopee. Chưa lưu.');
     let submitted=false;
+    const stage=edit.field+'-'+(target.variant?'multi':'single');
     try{
       await unit.locator(edit.field==='price'?'.list-view-price, .list-view-model-price':'.stock-content').click();
       const dialog=page.locator('.eds-modal__content:visible').filter({has:page.getByText(edit.field==='price'?'Cập nhật giá':'Cập nhật kho hàng',{exact:true})});
       await dialog.locator('input:visible').first().waitFor();
+      await this.monitor?.check(profileId,'products',stage,page);
       const inputBox=await this.dialogInput(page,dialog,edit.field,target.variant);
       const title=normal(await dialog.locator(edit.field==='price'?'.price-edit-name':'.stock-edit-name').innerText());
       if(title!==normal(target.name)&&title!==normal(target.variant))throw Error('Tên trong hộp sửa không khớp sản phẩm đã chọn.');
       const currentText=(await inputBox.inputValue()).trim();
       if(!/^\d+$/.test(currentText))throw Error('Không đọc được giá/kho gốc chính xác.');
       const current=Number(currentText);
-      if(current!==edit.expected)throw Error('Giá/kho trong hộp sửa khác dữ liệu hiển thị (có thể giá khuyến mãi). Không tự ghi đè.');
-      if(dryRun||current===edit.value)return {row,changed:false,dryRun};
+      if(current!==liveExpected)throw Error('Giá/kho trong hộp sửa khác dữ liệu Shopee vừa đọc (có thể đang có đơn mới hoặc giá khuyến mãi). Chưa lưu; thử lại sau khi kiểm tra Shopee.');
+      if(dryRun||current===edit.value)return {row,changed:false,dryRun,previous:current};
       const before=await dialog.locator('input').evaluateAll(es=>es.map(e=>e.value));
       const inputIndex=await inputBox.evaluate(e=>[...e.closest('.eds-modal__content').querySelectorAll('input')].indexOf(e));
       await inputBox.fill(String(edit.value));await inputBox.blur();
       const after=await dialog.locator('input').evaluateAll(es=>es.map(e=>e.value));
       if(after.length!==before.length||after.some((v,i)=>i!==inputIndex&&v!==before[i]))throw Error('Có trường ngoài phân loại yêu cầu bị thay đổi. Không lưu.');
-      beforeSubmit();submitted=true;
+      await this.monitor?.check(profileId,'products',stage,page);
+      beforeSubmit({previous:current});submitted=true;
       await dialog.getByRole('button',{name:edit.field==='price'?'Cập nhật giá':'Cập nhật',exact:true}).click();
       await dialog.waitFor({state:'hidden',timeout:20000});
       // Reopen a fresh page and re-read the exact ID/model, never trust the submit response alone.
       const fresh=await this.find(profileId,target);
       if(fresh.row[edit.field]!==edit.value)throw Error('Chưa xác minh được giá trị mới sau khi lưu.');
-      return {row:fresh.row,changed:true};
-    }catch(e){if(submitted)e.message='Đã gửi thao tác tới Shopee nhưng chưa xác minh hoàn tất. Không tự gửi lại; quét sản phẩm để kiểm tra. '+e.message;throw e;}
+      return {row:fresh.row,changed:true,previous:current};
+    }catch(e){if(e.name==='TimeoutError'||/duy nhất|Tên trong hộp|nhiều kho/.test(e.message))await this.monitor?.failure(profileId,'products',stage,page,e);if(submitted)e.message='Đã gửi thao tác tới Shopee nhưng chưa xác minh hoàn tất. Không tự gửi lại; quét sản phẩm để kiểm tra. '+e.message;throw e;}
     finally{const cancel=page.locator('.eds-modal__content:visible').getByRole('button',{name:'Hủy bỏ',exact:true});if(await cancel.isVisible().catch(()=>false))await cancel.click().catch(()=>{});}
   }
 }

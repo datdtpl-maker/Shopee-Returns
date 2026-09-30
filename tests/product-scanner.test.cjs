@@ -20,12 +20,12 @@ test('variant edit changes only the selected row; ambiguous labels block submit'
  const result=await scanner.edit('p',target,{field:'price',expected:200,value:250});assert.equal(result.row.price,250);assert.deepEqual(await page.locator('input').evaluateAll(es=>es.map(e=>e.value)),['','100','250']);assert.equal(await page.evaluate(()=>window.saved),1);
  await page.locator('.price-edit-variation').first().evaluate(e=>e.textContent='Large');await assert.rejects(scanner.edit('p',target,{field:'price',expected:250,value:300}),/duy nhất phân loại/);assert.equal(await page.evaluate(()=>window.saved),1);
 });
-test('edit checks identity/old value, saves once and verifies by fresh reread',async t=>{
+test('edit compares the dialog to the live read, saves once and verifies by fresh reread',async t=>{
  const page=await setup(t);await page.setContent('<table>'+single('123')+'</table><div class="eds-modal__content" hidden><h2>Cập nhật kho hàng</h2><p class="stock-edit-name">Sản phẩm 123</p><input value="20"><button>Hủy bỏ</button><button>Cập nhật</button></div>');
  await page.evaluate(()=>{window.saved=0;document.querySelector('.stock-content').onclick=()=>document.querySelector('.eds-modal__content').hidden=false;document.querySelectorAll('button')[0].onclick=()=>document.querySelector('.eds-modal__content').hidden=true;document.querySelectorAll('button')[1].onclick=()=>{window.saved++;document.querySelector('.stock-text').textContent=document.querySelector('input').value;document.querySelector('.eds-modal__content').hidden=true;};});
  const scanner=new ProductScanner({}),target={shop:'shop',name:'Sản phẩm 123',variant:'',productId:'123',modelId:'1239'};
  scanner.find=async()=>({page,row:(await page.evaluate(readProducts)).rows[0],unit:page.locator('.product-variation-item')});let submitted=0;
  const result=await scanner.edit('p',target,{field:'stock',expected:20,value:0},{beforeSubmit:()=>submitted++});assert.equal(result.row.stock,0);assert.equal(submitted,1);assert.equal(await page.evaluate(()=>window.saved),1);
- await assert.rejects(scanner.edit('p',target,{field:'stock',expected:20,value:1}),/đã thay đổi/);assert.equal(await page.evaluate(()=>window.saved),1);
- await page.locator('input').evaluate(e=>e.value='99');await assert.rejects(scanner.edit('p',target,{field:'stock',expected:0,value:1}),/hộp sửa khác/);assert.equal(await page.evaluate(()=>window.saved),1);
+ const second=await scanner.edit('p',target,{field:'stock',expected:20,value:1});assert.equal(second.previous,0);assert.equal(await page.evaluate(()=>window.saved),2);
+ await page.locator('input').evaluate(e=>e.value='99');await assert.rejects(scanner.edit('p',target,{field:'stock',expected:20,value:2}),/hộp sửa khác/);assert.equal(await page.evaluate(()=>window.saved),2);
 });

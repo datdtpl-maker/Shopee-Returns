@@ -2,8 +2,9 @@ const {app,BrowserWindow,ipcMain,safeStorage,shell,dialog,Tray,Menu,nativeImage,
 const fs=require('node:fs');const path=require('node:path');
 const {Store}=require('./core.cjs');const {Scanner}=require('./scanner.cjs');const {Integrations}=require('./integrations.cjs');
 const {Products,TARGET:PRODUCT_TARGET}=require('./products.cjs');const {ProductScanner}=require('./product-scanner.cjs');
+const {InterfaceMonitor}=require('./interface-monitor.cjs');
 const {fetchSheet,sheetUrl}=require('./sheets.cjs');
-let window,store,scanner,integrations,products,timer,secretFile,secretValues={},scanning=false,nextScan=null,clearingNotion=false;
+let window,store,scanner,integrations,products,interfaceMonitor,timer,secretFile,secretValues={},scanning=false,nextScan=null,clearingNotion=false;
 const dataDir=process.env.SRM_DATA_DIR||(app.isPackaged?path.join(app.getPath('appData'),'ShopeeReturns','data'):path.join(__dirname,'..','data'));
 let tray,powerBlocker;
 const testMode=process.env.SRM_DRIVER==='1';
@@ -26,9 +27,10 @@ app.whenReady().then(async()=>{
     try {secretValues=JSON.parse(safeStorage.decryptString(fs.readFileSync(secretFile)));}
     catch {store.log('error','Không giải mã được thông tin kết nối. Nhập lại token trong Cài đặt.');}
   }
-  scanner=new Scanner(dataDir);integrations=new Integrations(store,()=>secretValues);products=new Products(dataDir,store,integrations,new ProductScanner(scanner));
+  interfaceMonitor=new InterfaceMonitor(dataDir,()=>emit());
+  scanner=new Scanner(dataDir,interfaceMonitor);integrations=new Integrations(store,()=>secretValues);products=new Products(dataDir,store,integrations,new ProductScanner(scanner));
   for(const p of store.data.profiles) if(p.status==='Đang quét') p.status='Cần quét lại';
-  const snapshot=()=>({products:products.snapshot(),profiles:store.data.profiles,orders:store.visibleOrders(),hiddenOrders:store.data.orders.length-store.visibleOrders().length,logs:store.data.logs,settings:store.data.settings,sheet:store.data.sheet||{},scanning,nextScan,clearingNotion,notionAwaitScan:!!store.data.notionAwaitScan,notionClearPending:!!store.data.notionClearPending,
+  const snapshot=()=>({interfaces:interfaceMonitor.snapshot(),products:products.snapshot(),profiles:store.data.profiles,orders:store.visibleOrders(),hiddenOrders:store.data.orders.length-store.visibleOrders().length,logs:store.data.logs,settings:store.data.settings,sheet:store.data.sheet||{},scanning,nextScan,clearingNotion,notionAwaitScan:!!store.data.notionAwaitScan,notionClearPending:!!store.data.notionClearPending,
     dataDir,version:app.getVersion(),credentials:{notion:!!secretValues.notionToken,telegram:!!secretValues.telegramToken},jobs:{pending:store.data.jobs.filter(j=>j.status==='pending'&&store.data.orders.some(o=>o.id===j.payload.orderKey&&store.isEligible(o))).length,errors:store.data.jobs.filter(j=>j.status==='pending'&&j.error&&store.data.orders.some(o=>o.id===j.payload.orderKey&&store.isEligible(o))).length}});
   const emit=()=>{if(window&&!window.isDestroyed()) window.webContents.send('state',snapshot());};
   const plan=()=>{nextScan=store.data.settings.autoScan&&!store.data.notionAwaitScan&&!store.data.notionClearPending?Date.now()+store.data.settings.intervalMinutes*60000:null;};
@@ -41,10 +43,10 @@ app.whenReady().then(async()=>{
     scanning=true;integrations.paused=true;emit();
     // Finish any already-started outbound request before replacing its evidence.
     while(integrations.running)await new Promise(r=>setTimeout(r,25));
-    store.invalidate(profiles.map(p=>p.id));emit();const succeeded=[];
+    store.invalidate(profiles.map(p=>p.id));emit();const succeeded=[],healthProfiles=[];
     try {
       for(const p of profiles) {
-        p.status='Đang quét';emit();
+        p.status='Đang quét';emit();const profileStarted=Date.now();
         try {
           const result=await scanner.scan(p.id);const added=store.ingest(p.id,result.rows);
           if(result.unresolved){store.invalidate([p.id]);throw Error('Có dòng chưa đọc được. Chưa đối chiếu lượt này để tránh dữ liệu thiếu.');}
@@ -53,6 +55,11 @@ app.whenReady().then(async()=>{
           p.lastTotal=result.totalOrders;p.lastIgnored=result.ignored;
           store.log(result.unresolved?'warning':'success',`${p.name}: đọc hết trang (${result.totalOrders} mã đơn), ${result.rows.length} đơn có chữ đỏ/xanh, ${added} đơn mới; ${result.ignored} mã không có màu cần lấy${result.unresolved?`, ${result.unresolved} dòng chưa đọc được — cần kiểm tra`:''}.`);
         } catch(e) {p.status='Cần kiểm tra';store.log('error',`${p.name}: ${safeError(e)}`);}
+        // A completed browser probe (including a failed contract) also schedules
+        // a read-only product-list probe. Mock scans without browser evidence do
+        // not manufacture a health result or open unrelated real profiles.
+        const evidence=interfaceMonitor.data.records[interfaceMonitor.key(p.id,'returns','list')];
+        if(evidence&&Date.parse(evidence.checkedAt)>=profileStarted)healthProfiles.push(p);
         emit();
       }
       if(succeeded.length) {
@@ -61,6 +68,11 @@ app.whenReady().then(async()=>{
           store.data.notionAwaitScan=false;
           store.log('success',`Google Sheet: đọc mới ${result.count} dòng; ${report.matched} đơn khớp chính xác và có một mã vận đơn; ${report.conflicts} đơn mâu thuẫn không hiển thị.`);
         }catch(e){store.invalidate(succeeded);store.data.sheet={...store.data.sheet,error:safeError(e)};store.log('error',`Google Sheet: ${safeError(e)} Không hiển thị hoặc gửi dữ liệu của lượt này.`);}
+      }
+      if(healthProfiles.length){
+        // Deliver freshly matched returns before additional read-only UI probes.
+        integrations.paused=false;await integrations.drain();
+        for(const p of healthProfiles)try{await products.scanner.open(p.id);}catch(e){store.log('warning',`${p.name} · kiểm tra giao diện sản phẩm: ${safeError(e)}`);}
       }
     } finally {scanning=false;integrations.paused=false;plan();store.save();emit();}
     await integrations.drain();emit();return snapshot();
@@ -83,6 +95,20 @@ app.whenReady().then(async()=>{
   handle('products-edit-batch',request=>productTask(()=>products.editBatch(request,emit,safeError)));
   handle('products-stop-batch',()=>{products.stopBatch();emit();});
   handle('products-notion',()=>shell.openExternal('https://www.notion.so/'+(products.data.databaseId||PRODUCT_TARGET)));
+  handle('interfaces-check',()=>productTask(async()=>{
+    const profiles=store.data.profiles.filter(p=>p.enabled);if(!profiles.length)throw Error('Bật ít nhất một profile đã đăng nhập.');
+    for(const p of profiles){
+      products.progress='Kiểm tra giao diện · '+p.name;emit();
+      for(const probe of [()=>scanner.scan(p.id),()=>products.scanner.open(p.id)])try{await probe();}catch(e){store.log('warning',p.name+' · '+safeError(e));}
+    }
+    products.progress='Đã kiểm tra giao diện danh sách của hai module. Hộp sửa được kiểm tra khi sử dụng.';emit();return interfaceMonitor.snapshot();
+  }));
+  handle('interfaces-report',id=>shell.showItemInFolder(interfaceMonitor.reportPath(id)));
+  handle('interfaces-accept',id=>productTask(async()=>{
+    const row=interfaceMonitor.snapshot().find(r=>r.id===id);if(!row?.canAccept)throw Error('Cấu trúc chưa phù hợp. Cần sửa bộ đọc và kiểm tra lại.');
+    const answer=await dialog.showMessageBox(window,{type:'question',message:'Dùng mẫu DOM/CSS vừa kiểm tra làm mẫu đối chiếu mới?',detail:'Chỉ chấp nhận sau khi bạn đã xem báo cáo. Thao tác này không sửa selector hay luồng chạy. Cấu trúc thiếu thành phần hoặc đổi nhóm màu vận chuyển không được chấp nhận.',buttons:['Huỷ','Chấp nhận mẫu'],defaultId:0,cancelId:0,noLink:true});
+    if(answer.response===1)interfaceMonitor.accept(id);
+  }));
 
   handle('clear-notion',async()=>{
     if(scanning||clearingNotion||products.busy)throw Error('Hãy đợi lượt quét hoặc thao tác xoá đang chạy hoàn tất.');
@@ -141,7 +167,7 @@ app.whenReady().then(async()=>{
   handle('retry',()=>{for(const j of store.data.jobs) if(j.status==='pending') j.nextAt=0;store.save();void integrations.drain().then(emit);});
   handle('open-notion',()=>shell.openExternal('https://www.notion.so/'+(store.data.settings.notionDatabaseId||store.data.settings.notionPageId)));
   handle('open-sheet',()=>{sheetUrl(store.data.settings.sheetUrl);return shell.openExternal(store.data.settings.sheetUrl);});
-  if(process.env.SRM_DRIVER==='1') app.srmDriver={scanner,store,integrations,products};
+  if(process.env.SRM_DRIVER==='1') app.srmDriver={scanner,store,integrations,products,interfaceMonitor};
   window=new BrowserWindow({width:1420,height:960,minWidth:760,minHeight:620,title:'Shopee · Quản lý hoàn huỷ',backgroundColor:'#f5f6f8',webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
   tray=new Tray(nativeImage.createFromPath(path.join(__dirname,'icon.png')));
   tray.setToolTip('Shopee Returns — đang chạy');

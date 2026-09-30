@@ -56,3 +56,7 @@ test('stop finishes current item only; restart never resumes queued or ambiguous
  service.data.batch.status='running';service.data.batch.items[0].status='running';service.data.batch.items[1].status='queued';service.data.actions[0].status='submitted';service.save();
  const restored=new Products(service.store.dir,service.store,service.i,scanner);assert.equal(restored.data.batch.status,'interrupted');assert.deepEqual(restored.data.batch.items.map(i=>i.status),['uncertain','cancelled']);assert.equal(calls,1);
 });
+test('interface drift stops batch before subsequent mutations',async t=>{
+ const {service,scanner}=setup(t),r=service.data.rows[0];let calls=0;scanner.edit=async()=>{calls++;const e=Error('DOM changed');e.code='INTERFACE_CHANGED';throw e;};
+ const result=await service.editBatch({requestId:'batch-interface-stop',items:[{id:r.id,field:'price',expected:100000,value:110000},{id:r.id,field:'stock',expected:20,value:0}]});assert.equal(calls,1);assert.equal(result.status,'stopped');assert.deepEqual(result.items.map(i=>i.status),['failed','cancelled']);
+});

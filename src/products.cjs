@@ -120,13 +120,14 @@ class Products{
  async edit(id,input,{batchItem}={}){
   const r=this.data.rows.find(r=>r.id===id);if(!r||!r.profileId||!this.data.shops[r.profileId])throw Error('Chưa liên kết profile với shop. Quét shop này một lần trước khi sửa.');
   this.store.profile(r.profileId);const {validateEdit}=require('./product-scanner.cjs');const edit=validateEdit(input);
-  if(r[edit.field]!==edit.expected)throw Error('Dữ liệu đã thay đổi. Đóng hộp sửa và chọn lại.');
-  const action={id:randomUUID(),productKey:key(r),name:r.name,variant:r.variant,...edit,at:new Date().toISOString(),status:'preparing'};
+  const action={id:randomUUID(),productKey:key(r),name:r.name,variant:r.variant,...edit,requestedExpected:edit.expected,at:new Date().toISOString(),status:'preparing'};
   if(this.data.actions.some(a=>a.productKey===action.productKey&&a.status==='uncertain'))throw Error('Có thao tác chưa xác minh. Quét lại shop trước khi sửa tiếp.');
   this.data.actions.unshift(action);this.data.actions=this.data.actions.filter((a,i)=>i<300||a.status==='uncertain');this.save();
   if(batchItem){batchItem.actionId=action.id;this.save();}
   try{
-   const result=await this.scanner.edit(r.profileId,r,edit,{beforeSubmit:()=>{action.status='submitted';this.save();}});
+   const observe=previous=>{if(Number.isSafeInteger(previous)&&previous>=0){action.expected=previous;if(batchItem)batchItem.expected=previous;}};
+   const result=await this.scanner.edit(r.profileId,r,edit,{beforeSubmit:e=>{observe(e?.previous);action.status='submitted';this.save();}});
+   observe(result.previous);
    Object.assign(r,result.row,{scannedAt:new Date().toISOString(),source:'Shopee',sync:'pending'});action.status='verified';this.save();
    try{await this.sync(()=>{},r.id);}catch(e){action.status='notion-pending';this.save();return {notionPending:true,message:'Shopee đã lưu và xác minh. Notion chưa ghi được; bấm Đồng bộ lại. '+e.message};}
    return {notionPending:false,message:'Đã xác minh '+(edit.field==='price'?'giá':'tồn kho')+' trên Shopee và đồng bộ Notion.'};
@@ -146,10 +147,9 @@ class Products{
    const edit=validateEdit(input),r=this.data.rows.find(r=>r.id===input.id);
    if(!r?.profileId||this.data.shops[r.profileId]?.name!==r.shop)throw Error('Sản phẩm chưa liên kết đúng profile. Tải dữ liệu Notion trước.');
    this.store.profile(r.profileId);
-   if(r[edit.field]!==edit.expected)throw Error('Dữ liệu '+r.name+' đã thay đổi. Mở lại danh sách để kiểm tra.');
    const identity=key(r)+'|'+edit.field;if(seen.has(identity))throw Error('Một trường sản phẩm xuất hiện nhiều lần.');seen.add(identity);
    if(this.data.actions.some(a=>a.productKey===key(r)&&a.status==='uncertain'))throw Error('Có sản phẩm chưa xác minh thao tác trước. Quét lại shop trước khi chạy.');
-   return {id:r.id,productKey:key(r),shop:r.shop,name:r.name,variant:r.variant,...edit,status:'queued'};
+   return {id:r.id,productKey:key(r),shop:r.shop,name:r.name,variant:r.variant,...edit,requestedExpected:edit.expected,status:'queued'};
   });
   const batch={id:request.requestId,status:'running',startedAt:new Date().toISOString(),stopRequested:false,items};
   this.data.batch=batch;this.save();emit();
@@ -161,7 +161,7 @@ class Products{
      const r=this.data.rows.find(r=>r.id===item.id);if(!r||key(r)!==item.productKey)throw Error('Sản phẩm đã thay đổi. Không sửa.');
      const result=await this.edit(item.id,item,{batchItem:item});item.status=result.notionPending?'notion-pending':'verified';
      if(result.notionPending)item.error=result.message;
-    }catch(e){item.status=this.data.actions.find(a=>a.id===item.actionId)?.status==='uncertain'?'uncertain':'failed';item.error=sanitize(e);}
+    }catch(e){item.status=this.data.actions.find(a=>a.id===item.actionId)?.status==='uncertain'?'uncertain':'failed';item.error=sanitize(e);if(e.code==='INTERFACE_CHANGED')batch.stopRequested=true;}
     this.save();emit();
    }
    batch.status=batch.stopRequested?'stopped':'completed';
