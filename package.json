@@ -1,18 +1,20 @@
 {
   "name": "shopee-return-manager",
-  "version": "1.4.1",
+  "version": "1.6.44",
   "private": true,
-  "description": "Quản lý đơn hoàn huỷ Shopee trên Windows",
+  "description": "QuĂ¡ÂºÂ£n lÄ‚Â½ Ă„â€˜Ă†Â¡n hoÄ‚Â n huĂ¡Â»Â· Shopee trÄ‚Âªn Windows",
   "main": "src/main.cjs",
   "scripts": {
     "start": "electron .",
     "test": "node --test tests/*.test.cjs",
-    "test:ui": "node tests/ui-smoke.cjs && node tests/products-ui.cjs && node tests/product-batch-ui.cjs && node tests/interface-ui.cjs",
-    "check": "node --check src/main.cjs && node --check src/core.cjs && node --check src/scanner.cjs && node --check src/integrations.cjs && node --check src/renderer.js && node --check src/products.cjs && node --check src/product-scanner.cjs && node --check src/product-batch-ui.js && node --check src/interface-monitor.cjs && node --check src/interface-ui.js",
+    "test:ui": "node tests/ui-smoke.cjs && node tests/products-ui.cjs && node tests/product-batch-ui.cjs && node tests/interface-ui.cjs && node tests/replacement-ui.cjs && node tests/studio-ui.cjs && node tests/gemini-status-ui.cjs && node tests/studio-manual-ui.cjs && node tests/studio-chrome-ui.cjs && node tests/studio-chrome-integration.cjs && node tests/chrome-pairing-persistence.cjs && node tests/studio-draft-delete-ui.cjs && node tests/studio-cdp-integration.cjs",
+    "check": "node --check src/main.cjs && node --check src/preload.cjs && node --check src/core.cjs && node --check src/scanner.cjs && node --check src/integrations.cjs && node --check src/renderer.js && node --check src/products.cjs && node --check src/product-scanner.cjs && node --check src/product-batch-ui.js && node --check src/interface-monitor.cjs && node --check src/interface-ui.js && node --check src/replacements.cjs && node --check src/replacement-editor.cjs && node --check src/replacement-date.cjs && node --check src/replacement-images.cjs && node --check src/replacement-notion-images.cjs && node --check src/replacement-ui.js && node --check src/replacement-studio.cjs && node --check src/studio-settings.cjs && node --check src/studio-gemini.cjs && node --check src/studio-drive.cjs && node --check src/studio-chatgpt.cjs && node --check src/studio-ui.js && node --check src/studio-reference.cjs && node --check src/studio-prompts.cjs && node --check src/replacement-status.cjs && node --check src/studio-manual.cjs && node --check src/studio-manual-files.cjs && node --check src/studio-chrome-bridge.cjs && node --check src/chrome-image-extension/background.js && node --check src/chrome-image-extension/content.js && node --check src/chrome-image-extension/guards.js && node --check src/chrome-image-extension/popup.js && node --check src/studio-chrome-pairing.cjs",
     "build:win": "electron-builder --win nsis --x64"
   },
   "dependencies": {
-    "playwright": "^1.55.0"
+    "dotenv": "^16.6.1",
+    "playwright": "^1.55.0",
+    "sharp": "^0.35.5"
   },
   "devDependencies": {
     "electron": "44.3.0",
@@ -31,7 +33,7 @@
       "package.json",
       "!**/*.map"
     ],
-    "asar": true,
+    "asar": false,
     "win": {
       "target": "nsis",
       "icon": "build/icon.ico",
@@ -46,6 +48,15 @@
       "createStartMenuShortcut": true,
       "runAfterFinish": false,
       "artifactName": "Shopee-Returns-Setup-${version}-${arch}.exe"
-    }
+    },
+    "extraResources": [
+      {
+        "from": "src/chrome-image-extension",
+        "to": "chrome-image-extension",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ]
   }
 }

@@ -32,18 +32,76 @@ function openBulk(){
  const rows=filteredBatchRows();
  $('#batch-entry-rows').innerHTML=rows.map(r=>'<tr><td>'+escape(r.shop)+'<strong>'+escape(r.name)+'</strong><small>'+escape(r.variant||'Không phân loại')+' · ID '+escape(r.productId)+' · Model '+escape(r.modelId)+'</small>'+(!r.profileId?'<small>Chưa liên kết profile: tải dữ liệu Notion trước.</small>':'')+'</td>'+['price','stock'].map(field=>{
   const draft=batchDrafts[batchDraftKey(r.id,field)];
-  return '<td><label><span>'+(field==='price'?'Giá mới (VND)':'Kho mới')+'</span><input type="number" step="1" min="'+(field==='price'?1:0)+'" max="1000000000" data-batch-id="'+escape(r.id)+'" data-batch-field="'+field+'" aria-label="'+escape((field==='price'?'Giá mới: ':'Kho mới: ')+r.name+' '+r.variant)+'" placeholder="Giữ nguyên" value="'+escape(draft?.value??'')+'" '+(!r.profileId?'disabled':'')+'></label><small>Lần đọc trước: '+escape(field==='price'?productMoney(r.price):r.stock)+'</small></td>';
+  if(field==='price'){
+    let pctVal='',diffBadge='';
+    if(draft?.value!==undefined&&draft.value!==''&&r.price){
+      const diff=Number(draft.value)-r.price;
+      const pct=Math.round((diff/r.price)*1000)/10;
+      pctVal=(pct>0?'+':'')+pct;
+      diffBadge=' <span class="batch-diff-badge '+(diff>0?'up':diff<0?'down':'')+'">'+(diff>0?'↑ ':'↓ ')+productMoney(Math.abs(diff))+' ('+(pct>0?'+':'')+pct+'%)</span>';
+    }
+    return '<td><label><span>Giá mới (VND)</span><div class="batch-price-input-group"><input type="number" step="1" min="1" max="1000000000" data-batch-id="'+escape(r.id)+'" data-batch-field="price" aria-label="'+escape('Giá mới: '+r.name+' '+r.variant)+'" placeholder="Giữ nguyên" value="'+escape(draft?.value??'')+'" '+(!r.profileId?'disabled':'')+'><div class="batch-row-pct-wrap"><input type="number" step="0.5" class="batch-row-pct-input" data-batch-id="'+escape(r.id)+'" placeholder="±%" title="Chỉnh theo % so với giá gốc" value="'+escape(pctVal)+'" '+(!r.profileId?'disabled':'')+'><span class="batch-row-pct-addon">%</span></div></div></label><small>Lần đọc trước: '+escape(productMoney(r.price))+diffBadge+'</small></td>';
+  }
+  return '<td><label><span>Kho mới</span><input type="number" step="1" min="0" max="1000000000" data-batch-id="'+escape(r.id)+'" data-batch-field="stock" aria-label="'+escape('Kho mới: '+r.name+' '+r.variant)+'" placeholder="Giữ nguyên" value="'+escape(draft?.value??'')+'" '+(!r.profileId?'disabled':'')+'></label><small>Lần đọc trước: '+escape(r.stock)+'</small></td>';
  }).join('')+'</tr>').join('')||'<tr><td colspan="3">Không có sản phẩm khớp bộ lọc.</td></tr>';
  batchCount();$('#batch-dialog').showModal();
 }
+function applyBatchPercent(percent){
+ const rows=filteredBatchRows();
+ for(const r of rows){
+  if(!r.profileId||!r.price)continue;
+  const k=batchDraftKey(r.id,'price');
+  if(percent===0){
+   delete batchDrafts[k];
+  } else {
+   const newPrice=Math.round(r.price*(1+percent/100));
+   batchDrafts[k]={id:r.id,field:'price',expected:r.price,value:String(newPrice),shop:r.shop,name:r.name,variant:r.variant,productId:r.productId,modelId:r.modelId};
+  }
+ }
+ saveBatchDrafts();openBulk();
+}
+$('#batch-dialog').querySelectorAll('.batch-pct-btn[data-batch-pct]').forEach(btn=>{
+ btn.addEventListener('click',()=>applyBatchPercent(Number(btn.dataset.batchPct)));
+});
+$('#batch-pct-apply-btn')?.addEventListener('click',()=>{
+ const customVal=parseFloat($('#batch-pct-custom-input')?.value);
+ if(!isNaN(customVal))applyBatchPercent(customVal);
+});
 $('#products-bulk').addEventListener('click',openBulk);
 $('#batch-close').addEventListener('click',()=>$('#batch-dialog').close());
 $('#batch-clear').addEventListener('click',()=>{batchDrafts={};saveBatchDrafts();$('#batch-entry-rows').querySelectorAll('input').forEach(e=>e.value='');batchCount();});
 $('#batch-entry-rows').addEventListener('input',e=>{
  const input=e.target;if(!input.dataset.batchId)return;
+ if(input.classList.contains('batch-row-pct-input')){
+  const row=data.products.rows.find(r=>r.id===input.dataset.batchId);
+  if(!row||!row.price)return;
+  const pct=parseFloat(input.value);
+  const k=batchDraftKey(row.id,'price');
+  const priceInput=$('#batch-entry-rows').querySelector('input[data-batch-id="'+row.id+'"][data-batch-field="price"]');
+  if(isNaN(pct)){
+   delete batchDrafts[k];
+   if(priceInput)priceInput.value='';
+  } else {
+   const newPrice=Math.round(row.price*(1+pct/100));
+   batchDrafts[k]={id:row.id,field:'price',expected:row.price,value:String(newPrice),shop:row.shop,name:row.name,variant:row.variant,productId:row.productId,modelId:row.modelId};
+   if(priceInput)priceInput.value=newPrice;
+  }
+  saveBatchDrafts();batchCount();
+  return;
+ }
  const row=data.products.rows.find(r=>r.id===input.dataset.batchId),field=input.dataset.batchField,k=batchDraftKey(row.id,field);
  if(input.value==='')delete batchDrafts[k];
  else batchDrafts[k]={id:row.id,field,expected:batchDrafts[k]?.expected??row[field],value:input.value,shop:row.shop,name:row.name,variant:row.variant,productId:row.productId,modelId:row.modelId};
+ if(field==='price'){
+  const pctInput=$('#batch-entry-rows').querySelector('.batch-row-pct-input[data-batch-id="'+row.id+'"]');
+  if(input.value===''||!row.price){
+   if(pctInput)pctInput.value='';
+  } else {
+   const diff=Number(input.value)-row.price;
+   const pct=Math.round((diff/row.price)*1000)/10;
+   if(pctInput)pctInput.value=(pct>0?'+':'')+pct;
+  }
+ }
  saveBatchDrafts();batchCount();
 });
 $('#batch-entry').addEventListener('submit',e=>{

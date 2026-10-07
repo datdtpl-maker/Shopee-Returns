@@ -11,10 +11,10 @@ const {_electron}=require('playwright');const assert=require('node:assert/strict
   app.srmDriver.scanner.scan=async()=>{globalThis.returnCalls++;return {rows:[],totalOrders:0,ignored:0,unresolved:0};};globalThis.fetch=async()=>({ok:true,text:async()=> 'Mã đơn hàng,Mã vận đơn\n260901TEST001,SPX123'});
   return p.data.rows.map(r=>r.id);
  });
- await page.reload();await page.locator('nav [data-tab="products"]').click();
+ await page.reload();await page.waitForFunction(()=>!!window.srm);await page.locator('nav [data-tab="products"]').click();
  const input=(id,field)=>page.locator('[data-batch-id="'+id+'"][data-batch-field="'+field+'"]');
  await page.locator('#product-search').fill('Alpha');await page.locator('#products-bulk').click();await input(ids[0],'price').fill('120000');await input(ids[0],'stock').fill('0');await page.locator('#batch-close').click();assert.equal(await app.evaluate(()=>globalThis.edits.length),0);
- await page.reload();await page.locator('nav [data-tab="products"]').click();await page.locator('#product-search').fill('Alpha');await page.locator('#products-bulk').click();assert.equal(await input(ids[0],'stock').inputValue(),'0');assert.equal(await input(ids[0],'price').inputValue(),'120000');assert.equal(await page.locator('#batch-entry-rows img').count(),0);
+ await page.reload();await page.waitForFunction(()=>!!window.srm);await page.locator('nav [data-tab="products"]').click();await page.locator('#product-search').fill('Alpha');await page.locator('#products-bulk').click();assert.equal(await input(ids[0],'stock').inputValue(),'0');assert.equal(await input(ids[0],'price').inputValue(),'120000');assert.equal(await page.locator('#batch-entry-rows img').count(),0);
  // Incoming snapshots may update the rest of the screen but must preserve draft/focus.
  await page.evaluate(()=>window.srm.call('products-stop-batch'));assert.equal(await input(ids[0],'price').inputValue(),'120000');await page.locator('#batch-close').click();
  await page.locator('#product-search').fill('Beta');await page.locator('#products-bulk').click();await input(ids[1],'stock').fill('999');await page.locator('#batch-preview').click();assert.equal(await page.locator('#batch-review-rows tr').count(),3);assert.equal(await app.evaluate(()=>globalThis.edits.length),0);

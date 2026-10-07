@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "Shopee Returns · Ảnh ChatGPT",
+  "version": "1.0.2",
+  "minimum_chrome_version": "102",
+  "description": "Ghép nối tab ChatGPT trong Chrome thường với Shopee Returns để tạo và lưu đúng 5 ảnh.",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://chatgpt.com/*",
+    "https://files.oaiusercontent.com/*",
+    "http://127.0.0.1:9223/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Ảnh ChatGPT · Shopee Returns",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*"
+      ],
+      "js": [
+        "guards.js",
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

@@ -7,8 +7,13 @@ class Store {
   constructor(dir) {
     this.dir = dir; fs.mkdirSync(dir, {recursive:true}); this.file = path.join(dir,'state.json');
     this.data = fs.existsSync(this.file) ? JSON.parse(fs.readFileSync(this.file,'utf8')) : {
-      version:1, profiles:[], orders:[], logs:[], jobs:[], settings:{intervalMinutes:10,autoScan:false,telegramEnabled:false,notionEnabled:false,notionPageId:'3d970655a9aa801ca5adfe0e07f32c4a',notionDatabaseId:'',chatId:''}
+      version:1, profiles:[], orders:[], logs:[], jobs:[], settings:{intervalMinutes:10,autoScan:false,telegramEnabled:false,notionEnabled:false,notionPageId:'3f070655a9aa81bea367d20e69715f9c',notionDatabaseId:'3f070655a9aa814f8ddace4aae761006',chatId:''}
     };
+    if (!this.data || typeof this.data !== 'object') this.data = {version:1, profiles:[], orders:[], logs:[], jobs:[], settings:{}};
+    if (!Array.isArray(this.data.profiles)) this.data.profiles = [];
+    if (!Array.isArray(this.data.orders)) this.data.orders = [];
+    if (!Array.isArray(this.data.logs)) this.data.logs = [];
+    if (!Array.isArray(this.data.jobs)) this.data.jobs = [];
     this.data.settings={sheetUrl:DEFAULT_SHEET,...this.data.settings};
     // Evidence is valid only in this running session. Persisted rows remain an audit/dedup record.
     this.currentScans=new Map();this.verified=new Map();
@@ -24,7 +29,10 @@ class Store {
   }
   visibleOrders(){return this.data.orders.filter(o=>this.isEligible(o));}
   save() { const tmp=this.file+'.tmp'; fs.writeFileSync(tmp,JSON.stringify(this.data,null,2)); fs.renameSync(tmp,this.file); }
-  log(level,message) { this.data.logs.unshift({id:randomUUID(),at:new Date().toISOString(),level,message}); this.data.logs=this.data.logs.slice(0,500); this.save(); }
+  log(level,message) {
+    if (!Array.isArray(this.data.logs)) this.data.logs = [];
+    this.data.logs.unshift({id:randomUUID(),at:new Date().toISOString(),level,message}); this.data.logs=this.data.logs.slice(0,500); this.save();
+  }
   addProfile(name) {
     name=String(name||'').trim(); if(!name || name.length>80) throw Error('Tên profile cần từ 1–80 ký tự.');
     this.checkProfileName(name);
@@ -66,6 +74,7 @@ class Store {
       }
       order={id:randomUUID(),profileId,profileName:p.name,orderId:row.orderId,shippingText:row.shippingText,color:row.color,state:'new',firstSeen:now,lastSeen:now,revision:1,notionPageId:null,telegramSentAt:null};
       Object.assign(order,{orderStatus:row.orderStatus||'',trackingNumbers:[],sheetStatus:'',sheetMatch:'pending'});
+      if (!Array.isArray(this.data.orders)) this.data.orders = [];
       this.data.orders.unshift(order); added++;
       this.job('telegram',order.id,{orderKey:order.id}); this.job('notion',`${order.id}:1`,{orderKey:order.id});
     }

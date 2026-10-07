@@ -26,7 +26,15 @@ class Integrations {
   }
   async ensureNotion() {
     const s=this.store.data.settings;
-    if(s.notionDatabaseId) {await this.ensureProperties(s.notionDatabaseId);return s.notionDatabaseId;}
+    if(s.notionDatabaseId) {
+      try {
+        await this.ensureProperties(s.notionDatabaseId);
+        return s.notionDatabaseId;
+      } catch(e) {
+        if(!/HTTP (400|404)/.test(e.message)) throw e;
+        s.notionDatabaseId=''; this.store.save();
+      }
+    }
     let cursor;let existing;
     do {
       const blocks=await this.notion(`blocks/${s.notionPageId}/children?page_size=100${cursor?'&start_cursor='+cursor:''}`);

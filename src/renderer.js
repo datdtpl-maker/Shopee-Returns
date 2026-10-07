@@ -6,7 +6,7 @@ const time=s=>s?new Date(s).toLocaleString('vi-VN'):'Chưa quét';
 const matchLabels={matched:'Đã khớp Sheet',not_found:'Chưa có trong Sheet',missing_tracking:'Sheet thiếu mã vận đơn',conflict:'Cần kiểm tra Sheet',pending:'Chưa đối chiếu'};
 function toast(text,error=false){$('#toast').textContent=text;$('#toast').className='toast'+(error?' error':'');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('#toast').classList.add('hidden'),6500);}
 async function call(name,...args){try{return await window.srm.call(name,...args);}catch(e){toast(e.message,true);throw e;}}
-function tab(id){document.querySelectorAll('.view').forEach(e=>e.classList.toggle('hidden',e.id!==id));document.querySelectorAll('nav [data-tab]').forEach(e=>e.classList.toggle('active',e.dataset.tab===id));$('#crumb').textContent={orders:'Đơn hoàn / huỷ',profiles:'Profile Shopee',products:'Kho sản phẩm',activity:'Lịch sử quét',settings:'Cài đặt kết nối'}[id];}
+function tab(id){document.querySelectorAll('.view').forEach(e=>e.classList.toggle('hidden',e.id!==id));document.querySelectorAll('nav [data-tab]').forEach(e=>e.classList.toggle('active',e.dataset.tab===id));$('#crumb').textContent={orders:'Đơn hoàn / huỷ',profiles:'Profile Shopee',products:'Kho sản phẩm',replacements:'Sản phẩm thay thế',activity:'Lịch sử quét',settings:'Cài đặt kết nối'}[id];}
 function render(snapshot){data=snapshot;const d=data;
   $('#total').textContent=d.orders.length;$('#nav-count').textContent=d.orders.length;
   $('#schedule-label').textContent=d.scanning?'Đang đọc dữ liệu Shopee…':d.nextScan?'Lượt tiếp theo · '+time(d.nextScan):'Quét tự động đang tắt';
@@ -18,16 +18,16 @@ function render(snapshot){data=snapshot;const d=data;
   $('#profile-list').innerHTML=d.profiles.map(p=>`<article class="panel profile-card"><div class="profile-top"><div class="profile-avatar">${escape(p.name[0].toUpperCase())}</div><div><h2>${escape(p.name)}</h2><span class="subtle">${escape(p.status)}</span></div><label class="check"><input type="checkbox" data-enable="${p.id}" ${p.enabled?'checked':''} aria-label="Bật quét ${escape(p.name)}"> Bật</label></div><dl><div><dt>Quét gần nhất</dt><dd>${time(p.lastScan)}</dd></div><div><dt>Đơn đỏ / xanh</dt><dd>${p.lastCount}</dd></div></dl><div class="button-row"><button type="button" data-rename="${p.id}" ${d.scanning||d.clearingNotion?'disabled':''}>Sửa tên</button><button data-login="${p.id}" ${d.scanning?'disabled':''}>Mở đăng nhập Shopee ↗</button><button class="primary" data-scan="${p.id}" ${d.scanning?'disabled':''}>Quét profile</button></div></article>`).join('')||'<div class="empty panel"><h3>Chưa có profile</h3><p>Đặt tên tài khoản ở trên để bắt đầu.</p></div>';
   $('#log-list').innerHTML=d.logs.map(l=>`<div class="log"><span class="badge ${l.level}">${{success:'Thành công',warning:'Cần kiểm tra',error:'Có lỗi'}[l.level]||'Thông tin'}</span><div>${escape(l.message)}<small>${time(l.at)}</small></div></div>`).join('')||'<div class="empty"><h3>Chưa có hoạt động</h3><p>Kết quả quét sẽ được ghi tại đây.</p></div>';
   $('#notion-status').textContent='Notion · '+(d.settings.notionEnabled?(d.settings.notionDatabaseId?'Đang bật đồng bộ':'Chờ tạo bảng'):'Đang tắt');
-  $('#telegram-status').textContent='Telegram · '+(d.settings.telegramEnabled?'Đang bật gửi':'Chưa bật');
+  if($('#telegram-status'))$('#telegram-status').textContent='Telegram · '+(d.settings.telegramEnabled?'Đang bật gửi':'Chưa bật');
   $('#sheet-status').textContent=d.sheet?.error?'Sheet · Lỗi đọc, không dùng kết quả cũ':`Đủ mã đơn + mã vận đơn · ${d.orders.length} đơn`;
   $('#sheet-detail').textContent=d.sheet?.error|| (d.sheet?.checkedAt?`Đã đọc ${d.sheet.rowCount} dòng · ${time(d.sheet.checkedAt)} · ${d.sheet.conflicts} đơn cần kiểm tra`:'Đọc Mã đơn hàng, Mã vận đơn và Tình trạng từ trang tính.');
   $('#scan-status').textContent=d.scanning?'Đang đọc mới Shopee và Sheet…':d.jobs.errors?`${d.jobs.errors} lần đồng bộ lỗi đang chờ thử lại`:`Chỉ hiện đơn khớp chính xác, đủ mã vận đơn · ${d.hiddenOrders||0} đơn lưu chưa đủ điều kiện hiện tại`;
   $('#empty h3').textContent=d.scanning?'Đang đối chiếu dữ liệu mới':'Chưa có đơn đủ điều kiện hiển thị';
   $('#empty p').textContent='Chỉ hiển thị khi mã đơn Shopee khớp chính xác một mã vận đơn hợp lệ trong Sheet ở lượt quét mới. Bấm Quét ngay để kiểm tra lại.';
-  if(!settingsLoaded){$('#interval').value=d.settings.intervalMinutes;$('#notion-page').value=d.settings.notionPageId;$('#notion-database').value=d.settings.notionDatabaseId;for(const [id,key] of [['start-windows','startWithWindows'],['keep-awake','keepAwake'],['close-tray','closeToTray']])$('#'+id).checked=!!d.settings[key];$('#auto-scan').checked=d.settings.autoScan;$('#chat-id').value=d.settings.chatId;$('#telegram-enabled').checked=d.settings.telegramEnabled;$('#notion-enabled').checked=d.settings.notionEnabled;$('#sheet-url').value=d.settings.sheetUrl;settingsLoaded=true;}
+  if(!settingsLoaded){$('#interval').value=d.settings.intervalMinutes;$('#notion-page').value=d.settings.notionPageId;$('#notion-database').value=d.settings.notionDatabaseId;for(const [id,key] of [['start-windows','startWithWindows'],['keep-awake','keepAwake'],['close-tray','closeToTray']])$('#'+id).checked=!!d.settings[key];$('#auto-scan').checked=d.settings.autoScan;if($('#chat-id'))$('#chat-id').value=d.settings.chatId||'';if($('#telegram-enabled'))$('#telegram-enabled').checked=!!d.settings.telegramEnabled;$('#notion-enabled').checked=d.settings.notionEnabled;$('#sheet-url').value=d.settings.sheetUrl;settingsLoaded=true;}
   $('#data-location').textContent=d.dataDir;$('#app-version').textContent='PHIÊN BẢN '+d.version;
-  $('#notion-saved').textContent=d.credentials.notion?'Đã lưu token mã hoá.':'Chưa lưu token.';$('#telegram-saved').textContent=d.credentials.telegram?'Đã lưu token mã hoá.':'Chưa lưu token.';
-  renderOrders();renderProducts();if(typeof renderBatchState==='function')renderBatchState();if(typeof renderInterfaceHealth==='function')renderInterfaceHealth();
+  $('#notion-saved').textContent=d.credentials.notion?'Đã lưu token mã hoá.':'Chưa lưu token.';if($('#telegram-saved'))$('#telegram-saved').textContent=d.credentials.telegram?'Đã lưu token mã hoá.':'Chưa lưu token.';
+  renderOrders();renderProducts();if(typeof renderBatchState==='function')renderBatchState();if(typeof renderInterfaceHealth==='function')renderInterfaceHealth();if(typeof renderReplacements==='function')renderReplacements();if(typeof renderStudio==='function')renderStudio(snapshot);
 }
 function renderOrders(){if(!data)return;const search=$('#search').value.toLowerCase();const profile=$('#profile-filter').value;
   const orders=data.orders.filter(o=>(!profile||o.profileId===profile)&&[o.orderId,...(o.trackingNumbers||[])].some(v=>v.toLowerCase().includes(search)));
@@ -76,9 +76,45 @@ $('#group-shipping').addEventListener('click',()=>{
   renderOrders();
 });
 $('#scan-all').addEventListener('click',async()=>{try{await call('scan');toast('Lượt quét đã kết thúc. Xem kết quả và nhật ký.');}catch{}});
-$('#settings-form').addEventListener('submit',async e=>{e.preventDefault();const b=e.submitter;b.disabled=true;try{await call('settings',{notionPageId:$('#notion-page').value,notionDatabaseId:$('#notion-database').value,startWithWindows:$('#start-windows').checked,keepAwake:$('#keep-awake').checked,closeToTray:$('#close-tray').checked,intervalMinutes:$('#interval').value,autoScan:$('#auto-scan').checked,chatId:$('#chat-id').value,sheetUrl:$('#sheet-url').value,telegramEnabled:$('#telegram-enabled').checked,notionEnabled:$('#notion-enabled').checked,notionToken:$('#notion-token').value,telegramToken:$('#telegram-token').value});$('#notion-token').value='';$('#telegram-token').value='';toast('Đã lưu cài đặt.');}catch{}finally{b.disabled=false;}});
+$('#settings-form').addEventListener('submit',async e=>{
+  e.preventDefault();const b=e.submitter||$('#settings-form button[type="submit"]');if(b)b.disabled=true;
+  try{
+    await call('settings',{
+      notionPageId:$('#notion-page').value,
+      notionDatabaseId:$('#notion-database').value,
+      startWithWindows:$('#start-windows').checked,
+      keepAwake:$('#keep-awake').checked,
+      closeToTray:$('#close-tray').checked,
+      intervalMinutes:$('#interval').value,
+      autoScan:$('#auto-scan').checked,
+      chatId:$('#chat-id')?.value||'',
+      sheetUrl:$('#sheet-url').value,
+      telegramEnabled:$('#telegram-enabled')?.checked||false,
+      notionEnabled:$('#notion-enabled').checked,
+      notionToken:$('#notion-token').value,
+      telegramToken:$('#telegram-token')?.value||''
+    });
+    $('#notion-token').value='';if($('#telegram-token'))$('#telegram-token').value='';
+    if($('#settings-gemini-key')?.value.trim()||$('#settings-gemini-model')?.value.trim()||$('#settings-drive-local')?.value.trim()||$('#settings-writing-reference')?.value.trim()){
+      const payload={};
+      if($('#settings-gemini-key')?.value.trim())payload.geminiApiKey=$('#settings-gemini-key').value.trim();
+      if($('#settings-gemini-model')?.value.trim())payload.geminiModel=$('#settings-gemini-model').value.trim();
+      if($('#settings-drive-local')?.value.trim())payload.driveLocalFolder=$('#settings-drive-local').value.trim();
+      if($('#settings-writing-reference')?.value!==undefined)payload.writingReference=$('#settings-writing-reference').value;
+      await call('studio-config',payload);
+    }
+    toast('Đã lưu cài đặt.');
+  }catch{}finally{if(b)b.disabled=false;}
+});
 $('#connect-notion').addEventListener('click',async e=>{e.target.disabled=true;try{await call('connect-notion');toast('Notion đã sẵn sàng.');}catch{}finally{e.target.disabled=false;}});
 $('#open-notion').addEventListener('click',()=>call('open-notion').catch(()=>{}));
+$('#settings-open-products')?.addEventListener('click',()=>call('products-notion').catch(()=>{}));
+$('#settings-open-replacements')?.addEventListener('click',()=>call('replacements-open','https://app.notion.com/p/3ec70655a9aa817099c5d877cdb5daa9?v=3ec70655a9aa81d89903000c8ec87c4a').catch(()=>{}));
+$('#settings-gemini-toggle')?.addEventListener('click',()=>{
+  const input=$('#settings-gemini-key');if(!input)return;
+  const isText=input.type==='text';input.type=isText?'password':'text';
+  $('#settings-gemini-toggle').textContent=isText?'Hiện key':'Ẩn key';
+});
 $('#open-sheet').addEventListener('click',()=>call('open-sheet').catch(()=>{}));
 $('#refresh-sheet').addEventListener('click',async e=>{e.target.disabled=true;try{await call('refresh-sheet');toast('Đã đối chiếu Google Sheet.');}catch{}finally{e.target.disabled=false;}});
 $('#retry').addEventListener('click',()=>call('retry').then(()=>toast('Đang thử lại các mục chờ đồng bộ.')).catch(()=>{}));
@@ -102,13 +138,33 @@ function renderProducts(){
  $('#product-actions').innerHTML=p.actions.slice(0,8).map(a=>'<p class="product-action">'+escape(a.name)+' · '+escape(a.variant)+' · '+(a.field==='price'?'Giá':'Kho')+': '+a.expected+' → '+a.value+' · <strong>'+escape(labels[a.status]||a.status)+'</strong><small>'+time(a.at)+' '+escape(a.error||'')+'</small></p>').join('')||'<p class="subtle">Chưa có thao tác sửa giá hoặc kho.</p>';
 }
 for(const id of ['product-search','product-profile'])$('#'+id).addEventListener('input',renderProducts);
-for(const action of ['scan','load','sync'])$('#products-'+action).addEventListener('click',async()=>{try{await call('products-'+action,...(action==='scan'?[$('#product-profile').value||null]:[]));toast('Đã hoàn tất thao tác sản phẩm.');}catch{}});
+for(const action of ['scan','load','sync'])$('#products-'+action).addEventListener('click',async()=>{try{await call('products-'+action,...(action==='scan'?[$('#product-profile').value||null]:[]));toast('Đã hoàn tất thao tác sản phẩm.');const fresh=await call('snapshot');render(fresh);}catch{}});
 $('#products-notion').addEventListener('click',()=>call('products-notion').catch(()=>{}));
+let currentProductBasePrice=0;
+function updateProductPriceDiff(newPrice,basePrice){
+ const diffEl=$('#product-price-diff-note'),pctInput=$('#product-price-percent');
+ if(!diffEl)return;
+ if(!basePrice||!newPrice){diffEl.textContent='';diffEl.className='product-price-diff-note';if(pctInput&&document.activeElement!==pctInput)pctInput.value='';return;}
+ const diff=newPrice-basePrice,pct=Math.round((diff/basePrice)*1000)/10;
+ if(pctInput&&document.activeElement!==pctInput)pctInput.value=pct===0?'0':(pct>0?'+'+pct:String(pct));
+ if(diff===0){diffEl.textContent='Bằng giá tham chiếu gốc (0%)';diffEl.className='product-price-diff-note neutral';}
+ else if(diff>0){diffEl.textContent='Tăng +'+diff.toLocaleString('vi-VN')+' ₫ (+'+pct+'%)';diffEl.className='product-price-diff-note up';}
+ else{diffEl.textContent='Giảm -'+Math.abs(diff).toLocaleString('vi-VN')+' ₫ ('+pct+'%)';diffEl.className='product-price-diff-note down';}
+}
 document.addEventListener('click',e=>{const b=e.target.closest('[data-product]');if(!b)return;const r=data.products.rows.find(r=>r.id===b.dataset.product);if(!r)return;
  const form=$('#product-edit-form');form.dataset.id=r.id;form.dataset.field=b.dataset.field;form.dataset.expected=String(r[b.dataset.field]);
- $('#product-edit-title').textContent=b.dataset.field==='price'?'Sửa giá bán':'Sửa kho hàng';$('#product-edit-name').textContent=r.shop+' · '+r.name+(r.variant?' · '+r.variant:'');
- $('#product-edit-old').textContent='Giá trị ở lần đọc trước: '+(b.dataset.field==='price'?productMoney(r.price):r.stock)+'. Khi lưu, tool đọc lại Shopee và đặt đúng giá trị mới bạn nhập.';$('#product-value-label').textContent=b.dataset.field==='price'?'Giá mới (VND)':'Tồn kho mới';$('#product-value').min=b.dataset.field==='price'?'1':'0';$('#product-value').value=r[b.dataset.field];$('#product-edit-error').textContent='';$('#product-dialog').showModal();$('#product-value').focus();$('#product-value').select();
+ const isPrice=b.dataset.field==='price';currentProductBasePrice=isPrice?Number(r.price)||0:0;
+ $('#product-edit-title').textContent=isPrice?'Sửa giá bán':'Sửa kho hàng';$('#product-edit-name').textContent=r.shop+' · '+r.name+(r.variant?' · '+r.variant:'');
+ $('#product-edit-old').textContent='Giá trị ở lần đọc trước: '+(isPrice?productMoney(r.price):r.stock)+'. Khi lưu, tool đọc lại Shopee và đặt đúng giá trị mới bạn nhập.';$('#product-value-label').textContent=isPrice?'Giá mới (VND)':'Tồn kho mới';$('#product-value').min=isPrice?'1':'0';$('#product-value').value=r[b.dataset.field];$('#product-edit-error').textContent='';
+ const pricePanel=$('#product-price-adjust-panel'),pctCol=$('#product-percent-col'),diffNote=$('#product-price-diff-note');
+ if(pricePanel)pricePanel.hidden=!isPrice;if(pctCol)pctCol.hidden=!isPrice;if(diffNote)diffNote.hidden=!isPrice;
+ if(isPrice&&$('#product-edit-base-price'))$('#product-edit-base-price').textContent=productMoney(r.price);
+ updateProductPriceDiff(Number(r.price)||0,currentProductBasePrice);
+ $('#product-dialog').showModal();$('#product-value').focus();$('#product-value').select();
 });
+$('#product-value').addEventListener('input',()=>{const form=$('#product-edit-form');if(form.dataset.field==='price')updateProductPriceDiff(Number($('#product-value').value)||0,currentProductBasePrice);});
+if($('#product-price-percent')){$('#product-price-percent').addEventListener('input',()=>{const pctVal=parseFloat($('#product-price-percent').value);if(!isNaN(pctVal)&&currentProductBasePrice>0){const newPrice=Math.round(currentProductBasePrice*(1+pctVal/100));$('#product-value').value=newPrice;updateProductPriceDiff(newPrice,currentProductBasePrice);}});}
+document.addEventListener('click',e=>{const pill=e.target.closest('.product-pct-pill');if(!pill||!currentProductBasePrice)return;const pct=parseFloat(pill.dataset.pct);if(isNaN(pct))return;const newPrice=Math.round(currentProductBasePrice*(1+pct/100));$('#product-value').value=newPrice;if($('#product-price-percent'))$('#product-price-percent').value=pct===0?'0':(pct>0?'+'+pct:String(pct));updateProductPriceDiff(newPrice,currentProductBasePrice);$('#product-value').focus();});
 $('#product-edit-cancel').addEventListener('click',()=>$('#product-dialog').close());
 $('#product-dialog').addEventListener('cancel',e=>{if($('#product-edit-save').disabled)e.preventDefault();});
 $('#product-edit-form').addEventListener('submit',async e=>{e.preventDefault();const form=e.currentTarget;$('#product-edit-save').disabled=true;$('#product-edit-cancel').disabled=true;$('#product-edit-error').textContent='Đang đọc lại Shopee và xác minh…';

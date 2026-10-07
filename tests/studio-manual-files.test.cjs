@@ -1,0 +1,32 @@
+const {test} = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const os = require('node:os');
+const sharp = require('sharp');
+const {ManualImageFiles} = require('../src/studio-manual-files.cjs');
+
+test('native file selections are bound to job, image slot and expiry; cancel does not add files', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'srm-native-images-'));
+  t.after(() => fs.rmSync(dir, {recursive: true, force: true}));
+  const file = path.join(dir, 'sample.png'); fs.writeFileSync(file, await sharp({create: {width: 512, height: 512, channels: 3, background: '#487764'}}).png().toBuffer());
+  let cancelled = true;
+  const io = new ManualImageFiles({dialog: {showOpenDialog: async () => ({canceled: cancelled, filePaths: [file]})}, window: () => null, clipboard: {writeText() {}}});
+  assert.deepEqual(await io.pick('job-1', 0), {cancelled: true}); assert.equal(io.files.size, 0);
+  cancelled = false;
+  const selections = [];
+  for (let i = 0; i < 5; i++) selections.push(await io.pick('job-1', i));
+  assert.match(selections[0].previewDataUrl, /^data:image\/jpeg;base64,/);
+  const ids = selections.map(item => item.selectionId);
+  const sample = await io.reference('job-1', ids[0]);
+  assert.equal(sample.mimeType, 'image/jpeg'); assert.match(sample.dataUrl, /^data:image\/jpeg;base64,/);
+  assert.equal((await sharp(Buffer.from(sample.dataUrl.split(',')[1], 'base64')).metadata()).format, 'jpeg');
+  await assert.rejects(io.reference('job-2', ids[0]), /không thuộc/);
+  assert.deepEqual(io.paths('job-1', ids), Array(5).fill(file));
+  assert.throws(() => io.paths('job-2', ids), /không thuộc/);
+  assert.throws(() => io.paths('job-1', ids.toReversed()), /không thuộc/);
+  assert.throws(() => io.paths('job-1', Array(5).fill(ids[0])), /đủ 5/);
+  const changed = await io.pick('job-1', 0); assert.throws(() => io.paths('job-1', ids), /hết hạn/);
+  ids[0] = changed.selectionId; io.files.get(ids[0]).at = 0; assert.throws(() => io.paths('job-1', ids), /hết hạn/);
+  io.clear(ids); assert.equal(io.files.size, 0);
+});

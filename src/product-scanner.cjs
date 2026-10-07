@@ -6,7 +6,7 @@ function readProducts(){
   const rows=[],errors=[],ids=[];
   const mains=[...document.querySelectorAll('.product-variation-item')];
   for(const main of mains){
-    const id=text(main.querySelector('.item-id')).match(/ID Sản phẩm:\s*(\d+)/)?.[1];
+    const id=text(main.querySelector('.item-id')).match(/ID [Ss]ản phẩm:\s*(\d+)/i)?.[1];
     const name=text(main.querySelector('a.product-name-wrap'));
     if(!id||!name){errors.push('Không đọc được ID hoặc tên sản phẩm.');continue;}
     ids.push(id);
@@ -143,10 +143,12 @@ class ProductScanner{
     if(normal(shop)!==target.shop)throw Error('Profile đang đăng nhập shop khác. Không sửa sản phẩm.');
     const search=page.getByPlaceholder('Tìm Tên sản phẩm, SKU sản phẩm, SKU phân loại, Mã sản phẩm',{exact:true});
     await search.fill(target.productId);await search.press('Enter');
-    await page.waitForFunction(id=>{const ids=[...document.querySelectorAll('.product-variation-item .item-id')];return ids.length===1&&ids[0].textContent.trim()==='ID Sản phẩm: '+id;},target.productId,{timeout:30000});
+    const applyBtn=page.getByRole('button',{name:'Áp dụng',exact:true});
+    if(await applyBtn.isVisible().catch(()=>false))await applyBtn.click().catch(()=>{});
+    await page.waitForFunction(id=>{const ids=[...document.querySelectorAll('.product-variation-item .item-id')];return ids.length===1&&ids[0].textContent.trim().toLowerCase().replace(/\s+/g,' ')===('id sản phẩm: '+id).toLowerCase();},target.productId,{timeout:30000});
     const d=await this.ready(page);await this.monitor?.check(profileId,'products','list',page,{deep:true});const row=d.rows.find(r=>r.productId===target.productId&&r.modelId===target.modelId);
-    if(!row||normal(row.name)!==normal(target.name)||normal(row.variant)!==normal(target.variant))throw Error('Tên hoặc phân loại đã thay đổi. Quét lại sản phẩm trước khi sửa.');
-    const container=page.locator('tr.eds-table__row').filter({has:page.locator('.item-id').filter({hasText:new RegExp('^ID Sản phẩm: '+target.productId+'$')})});
+    if(!row||(normal(row.name)!==normal(target.name)&&(!target.sourceName||normal(row.name)!==normal(target.sourceName))&&(!target.desiredName||normal(row.name)!==normal(target.desiredName)))||normal(row.variant)!==normal(target.variant))throw Error('Tên hoặc phân loại đã thay đổi. Quét lại sản phẩm trước khi sửa.');
+    const container=page.locator('tr.eds-table__row').filter({has:page.locator('.item-id').filter({hasText:new RegExp('^ID [Ss]ản phẩm:\\s*'+target.productId+'$','i')})});
     const unit=target.variant?container.locator('.model-list-item').filter({has:page.locator('.variation-name-info-sku').filter({hasText:new RegExp('^Model ID:\\s*'+target.modelId+'\\s*$')})}):container.locator('.product-variation-item');
     if(await unit.count()!==1)throw Error('Không xác định duy nhất phân loại cần sửa.');
     return {page,row,unit};

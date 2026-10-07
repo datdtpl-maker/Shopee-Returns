@@ -60,3 +60,13 @@ test('interface drift stops batch before subsequent mutations',async t=>{
  const {service,scanner}=setup(t),r=service.data.rows[0];let calls=0;scanner.edit=async()=>{calls++;const e=Error('DOM changed');e.code='INTERFACE_CHANGED';throw e;};
  const result=await service.editBatch({requestId:'batch-interface-stop',items:[{id:r.id,field:'price',expected:100000,value:110000},{id:r.id,field:'stock',expected:20,value:0}]});assert.equal(calls,1);assert.equal(result.status,'stopped');assert.deepEqual(result.items.map(i=>i.status),['failed','cancelled']);
 });
+test('deleteShop removes specific shop or all empty shops and re-binds profiles',async t=>{
+ const {service}=setup(t);
+ service.data.shops['p-empty']={name:'empty-shop',scannedAt:new Date().toISOString()};
+ assert.equal(Object.keys(service.data.shops).length,2);
+ service.deleteShop('empty-shop');
+ assert.equal(service.data.shops['p-empty'],undefined);
+ service.data.shops['p-empty2']={name:'empty-shop-2',scannedAt:new Date().toISOString()};
+ service.deleteShop('__empty__');
+ assert.equal(service.data.shops['p-empty2'],undefined);
+});

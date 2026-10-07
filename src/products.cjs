@@ -1,5 +1,6 @@
 const fs=require('node:fs');const path=require('node:path');const {randomUUID}=require('node:crypto');
 const TARGET='3e070655a9aa80d68197fb688ad8e289';
+const PRODUCT_DATABASE_ID='3e070655a9aa816c98f4dc2c863fa5bb';
 const key=r=>[r.shop,r.productId,r.modelId].join('|');
 const plain=(p,t='rich_text')=>(p?.[t]||[]).map(v=>v.plain_text??v.text?.content??'').join('');
 const rich=s=>[{type:'text',text:{content:String(s||'').slice(0,1900)}}];
@@ -12,6 +13,10 @@ class Products{
  constructor(dir,store,integrations,scanner){
   this.file=path.join(dir,'products.json');this.store=store;this.i=integrations;this.scanner=scanner;this.busy=false;this.progress='';
   this.data=fs.existsSync(this.file)?JSON.parse(fs.readFileSync(this.file,'utf8')):{version:1,databaseId:'',shops:{},rows:[],actions:[]};
+  if(!this.data || typeof this.data !== 'object') this.data = {version:1,databaseId:'',shops:{},rows:[],actions:[]};
+  if(!Array.isArray(this.data.rows)) this.data.rows = [];
+  if(!Array.isArray(this.data.actions)) this.data.actions = [];
+  if(!this.data.shops || typeof this.data.shops !== 'object') this.data.shops = {};
   for(const a of this.data.actions)if(['preparing','submitted'].includes(a.status))a.status='uncertain';
   if(this.data.batch?.status==='running'){
    this.data.batch.status='interrupted';
@@ -26,20 +31,29 @@ class Products{
   this.save();
  }
  save(){fs.writeFileSync(this.file+'.tmp',JSON.stringify(this.data,null,2));fs.renameSync(this.file+'.tmp',this.file);}
- snapshot(){return {rows:this.data.rows,shops:this.data.shops,busy:this.busy,progress:this.progress,databaseId:this.data.databaseId,actions:this.data.actions.slice(0,30),loadedAt:this.data.loadedAt,batch:this.data.batch||null};}
+ snapshot(){
+  if(!Array.isArray(this.data.rows)) this.data.rows = [];
+  if(!Array.isArray(this.data.actions)) this.data.actions = [];
+  if(!this.data.shops || typeof this.data.shops !== 'object') this.data.shops = {};
+  return {rows:this.data.rows,shops:this.data.shops,busy:this.busy,progress:this.progress,databaseId:this.data.databaseId,actions:this.data.actions.slice(0,30),loadedAt:this.data.loadedAt,batch:this.data.batch||null};
+ }
  async setup(){
   if(this.ready===this.data.databaseId&&this.ready)return this.ready;
-  let db;if(this.data.databaseId)db=await this.i.notion('databases/'+this.data.databaseId);
-  else{
+  let db;
+  const targetId=this.data.databaseId||PRODUCT_DATABASE_ID;
+  if(targetId){
+   try{db=await this.i.notion('databases/'+targetId);}catch(e){if(!/HTTP (400|404)/.test(e.message))throw e;}
+  }
+  if(!db){
    try{db=await this.i.notion('databases/'+TARGET);}catch(e){if(!/HTTP (400|404)/.test(e.message))throw e;}
-   if(!db){
+  }
+  if(!db){
     await this.i.notion('pages/'+TARGET);let cursor;const children=[];
     do{const result=await this.i.notion('blocks/'+TARGET+'/children?page_size=100'+(cursor?'&start_cursor='+cursor:''));children.push(...result.results);cursor=result.has_more?result.next_cursor:null;}while(cursor);
     const matches=children.filter(p=>p.type==='child_database'&&p.child_database.title==='Kho sản phẩm Shopee');
     if(matches.length>1)throw Error('Có nhiều bảng Kho sản phẩm Shopee. Cần kiểm tra Notion.');
     db=matches.length?await this.i.notion('databases/'+matches[0].id):await this.i.notion('databases','POST',{parent:{type:'page_id',page_id:TARGET},title:rich('Kho sản phẩm Shopee'),properties:SCHEMA});
    }
-  }
   const patch={};
   for(const [name,type] of Object.entries(SCHEMA)){
    if(!db.properties?.[name]){
@@ -74,7 +88,7 @@ class Products{
   await this.sync(emit);
  }
  parse(page){
-  const p=page.properties||{};return validateRow({shop:plain(p['Tên shop']),name:plain(p['Tên sản phẩm'],'title'),productId:plain(p['ID sản phẩm']),modelId:plain(p['Model ID']),variant:plain(p['Phân loại']),price:p['Giá bán']?.number,stock:p['Kho hàng']?.number,scannedAt:p['Quét lúc']?.date?.start||null,notionPageId:page.id});
+  const p=page.properties||{};return validateRow({shop:plain(p['Tên shop']),name:plain(p['Tên sản phẩm'],'title'),productId:plain(p['ID sản phẩm']),modelId:plain(p['Model ID']),variant:plain(p['Phân loại']),price:p['Giá bán']?.number,stock:p['Kho hàng']?.number,scannedAt:p['Quét lúc']?.date?.start||null,notionPageId:page.id,replacementUrl:p['Sản phẩm thay thế']?.url||'',replacementStatus:p['Cần thay thế']?.select?.name||''});
  }
  async remote(){const db=await this.setup();const pages=await this.i.listPages(db);const map=new Map();
   for(const page of pages){if(page.archived||page.in_trash)continue;
@@ -99,29 +113,88 @@ class Products{
  async load(){
   if(this.data.rows.some(r=>r.sync==='pending'))throw Error('Còn dữ liệu Shopee chờ ghi Notion. Bấm Đồng bộ lại trước khi tải Notion.');
   const remote=await this.remote(),old=new Map(this.data.rows.map(r=>[key(r),r]));
-  // A fresh machine can have Notion rows before its local product snapshot has
-  // a shop binding. Read only the account label from each logged-in profile so
-  // edit buttons become available without forcing a full product rescan.
+  const remoteShops=[...new Set([...remote.values()].map(r=>r.shop))];
+  const known=new Set(Object.values(this.data.shops).map(s=>s.name));
+  for(const p of this.store.data.profiles.filter(p=>p.enabled)){
+   if(this.data.shops[p.id]?.name)continue;
+   const pNorm=p.name.toLowerCase().trim();
+   const match=remoteShops.find(s=>{
+    const sNorm=s.toLowerCase().trim();
+    return pNorm===sNorm||pNorm.startsWith(sNorm)||pNorm.includes(sNorm)||sNorm.includes(pNorm);
+   });
+   if(match&&!known.has(match)){
+    this.data.shops[p.id]={name:match,scannedAt:new Date().toISOString(),total:null,models:0};
+    known.add(match);
+   }
+  }
   if(typeof this.scanner?.shop==='function'){
-   const known=new Set(Object.values(this.data.shops).map(s=>s.name));
    for(const p of this.store.data.profiles.filter(p=>p.enabled)){
     if(this.data.shops[p.id]?.name)continue;
     try{
      const name=await this.scanner.shop(p.id);if(!name||known.has(name))continue;
-     if([...remote.values()].some(r=>r.shop===name)){
+     if(remoteShops.includes(name)){
       this.data.shops[p.id]={name,scannedAt:new Date().toISOString(),total:null,models:0};known.add(name);
      }
     }catch{}
    }
   }
-  this.data.rows=[...remote.values()].map(r=>{const profileId=Object.keys(this.data.shops).find(id=>this.data.shops[id].name===r.shop);return {...r,id:old.get(key(r))?.id||randomUUID(),profileId:profileId||null,active:true,sync:'synced',source:'Notion'};});
+  this.data.rows=[...remote.values()].map(r=>{
+   let profileId=Object.keys(this.data.shops).find(id=>this.data.shops[id].name===r.shop);
+   if(!profileId){
+    const p=this.store.data.profiles.find(p=>{
+     const pNorm=p.name.toLowerCase().trim(),sNorm=r.shop.toLowerCase().trim();
+     return pNorm===sNorm||pNorm.startsWith(sNorm)||pNorm.includes(sNorm)||sNorm.includes(pNorm);
+    });
+    if(p){
+     profileId=p.id;
+     if(!this.data.shops[p.id]){
+      this.data.shops[p.id]={name:r.shop,scannedAt:new Date().toISOString(),total:null,models:0};
+     }
+    }
+   }
+   return {...r,id:old.get(key(r))?.id||randomUUID(),profileId:profileId||null,active:true,sync:'synced',source:'Notion'};
+  });
   this.data.loadedAt=new Date().toISOString();this.progress='Đã tải '+this.data.rows.length+' dòng từ Notion';this.save();
+ }
+ deleteShop(shopName){
+  if(!shopName)return;
+  const rowShops=new Set(this.data.rows.map(r=>r.shop));
+  if(shopName==='__empty__'||shopName==='all_empty'){
+   for(const [id,s] of Object.entries(this.data.shops)){
+    if(!rowShops.has(s.name))delete this.data.shops[id];
+   }
+  }else{
+   for(const [id,s] of Object.entries(this.data.shops)){
+    if(s.name===shopName)delete this.data.shops[id];
+   }
+   this.data.rows=this.data.rows.filter(r=>r.shop!==shopName);
+  }
+  const remainingShops=[...new Set(this.data.rows.map(r=>r.shop))];
+  for(const p of this.store.data.profiles.filter(p=>p.enabled)){
+   if(this.data.shops[p.id]?.name)continue;
+   const pNorm=p.name.toLowerCase().trim();
+   const match=remainingShops.find(s=>{
+    const sNorm=s.toLowerCase().trim();
+    return pNorm===sNorm||pNorm.startsWith(sNorm)||pNorm.includes(sNorm)||sNorm.includes(pNorm);
+   });
+   if(match){
+    this.data.shops[p.id]={name:match,scannedAt:new Date().toISOString(),total:null,models:0};
+   }
+  }
+  for(const r of this.data.rows){
+   if(!r.profileId){
+    const pid=Object.keys(this.data.shops).find(id=>this.data.shops[id].name===r.shop);
+    if(pid)r.profileId=pid;
+   }
+  }
+  this.save();
  }
  async edit(id,input,{batchItem}={}){
   const r=this.data.rows.find(r=>r.id===id);if(!r||!r.profileId||!this.data.shops[r.profileId])throw Error('Chưa liên kết profile với shop. Quét shop này một lần trước khi sửa.');
   this.store.profile(r.profileId);const {validateEdit}=require('./product-scanner.cjs');const edit=validateEdit(input);
   const action={id:randomUUID(),productKey:key(r),name:r.name,variant:r.variant,...edit,requestedExpected:edit.expected,at:new Date().toISOString(),status:'preparing'};
   if(this.data.actions.some(a=>a.productKey===action.productKey&&a.status==='uncertain'))throw Error('Có thao tác chưa xác minh. Quét lại shop trước khi sửa tiếp.');
+  if(!Array.isArray(this.data.actions))this.data.actions=[];
   this.data.actions.unshift(action);this.data.actions=this.data.actions.filter((a,i)=>i<300||a.status==='uncertain');this.save();
   if(batchItem){batchItem.actionId=action.id;this.save();}
   try{

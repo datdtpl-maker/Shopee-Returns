@@ -2,5 +2,9 @@ node_modules/
 data/
 work/
 dist/
-.env*
+scratch/
+.env
+.env.local
+.env.*.local
+!.env.example
 *.log
