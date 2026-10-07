@@ -135,6 +135,13 @@ class Integrations {
         } catch(e) {
           job.attempts++;job.nextAt=Date.now()+Math.min(3600000,30000*2**Math.min(job.attempts-1,7));job.error=e.message;
           this.store.log('error',`${job.kind==='telegram'?'Telegram':'Notion'} · ${order.orderId}: ${e.message} Sẽ thử lại.`);
+          if (job.kind === 'notion' && /HTTP (401|403|404)/.test(e.message)) {
+            const backoff = Date.now() + 300000;
+            for (const p of this.store.data.jobs) {
+              if (p.kind === 'notion' && p.status === 'pending' && p.nextAt <= Date.now()) p.nextAt = backoff;
+            }
+            break;
+          }
         }
         this.store.save();
       }
