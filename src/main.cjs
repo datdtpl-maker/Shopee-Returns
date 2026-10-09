@@ -49,7 +49,7 @@ app.whenReady().then(async()=>{
   writeLog('READY', 'app.whenReady() đã kích hoạt thành công.');
   store=new Store(dataDir);
   writeLog('STORE', 'Store đã sẵn sàng.');
-  store.data.settings={startWithWindows:app.isPackaged,keepAwake:app.isPackaged,closeToTray:app.isPackaged,...store.data.settings};store.save();
+  store.data.settings={startWithWindows:false,keepAwake:false,closeToTray:false,...store.data.settings};store.save();
   const applyRuntime=()=>{
     const s=store.data.settings;
     if(app.isPackaged&&!testMode)app.setLoginItemSettings({openAtLogin:!!s.startWithWindows,path:process.execPath});
