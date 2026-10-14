@@ -80,3 +80,10 @@ test('multi variants are preserved; unsupported variant price edits are blocked'
  const {page,editor,article}=await fixture(t);const schema=await editor.observe(page,target);schema.hasVariants=true;schema.variants=[{modelId:'a',name:'A',price:100,stock:2},{modelId:'b',name:'B',price:200,stock:3}];
  const product={...article.product,variants:schema.variants};assert.doesNotThrow(()=>editor.validate(schema,product));assert.throws(()=>editor.validate(schema,{...product,variants:[{...schema.variants[0],stock:99},schema.variants[1]]}),/giữ giá\/kho phân loại/);
 });
+test('allows existing required category attributes that already have values on Shopee',async t=>{
+ const {page,editor,article}=await fixture(t);
+ await page.locator('body').evaluate(e=>e.insertAdjacentHTML('afterbegin','<div><div class="edit-label mandatory"><i class="mandatory-icon">*</i>Độ tuổi khuyến nghị</div><input value="Trên 6 tháng tuổi"></div>'));
+ const schema=await editor.observe(page,target);
+ assert.ok(schema.required.some(f=>f.label==='Độ tuổi khuyến nghị'));
+ assert.doesNotThrow(()=>editor.validate(schema,article.product));
+});

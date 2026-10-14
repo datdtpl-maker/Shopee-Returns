@@ -79,7 +79,7 @@ class ReplacementEditor{
    if(clean(schema.shop)!==clean(target.shop))issues.push('Shop trên trang cập nhật không khớp profile.');
    const duplicates=schema.fields.filter((f,i,a)=>a.findIndex(x=>x.label===f.label)!==i&&f.kind!=='variants');
    if(duplicates.length)issues.push('Nhãn trường bị trùng: '+duplicates.map(f=>f.label).join(', '));
-   for(const f of schema.required)if(!KNOWN_REQUIRED.has(f.label)||f.kind==='unsupported')issues.push('Trường bắt buộc chưa hỗ trợ: '+f.label);
+   for(const f of schema.required){const hasValue=!!clean(f.value);if(!KNOWN_REQUIRED.has(f.label)){if(!hasValue)issues.push('Trường bắt buộc chưa hỗ trợ: '+f.label);}else if(f.kind==='unsupported')issues.push('Trường bắt buộc chưa hỗ trợ: '+f.label);}
    for(const label of ['Tên sản phẩm',DESCRIPTION])if(schema.fields.filter(f=>f.label===label).length!==1)issues.push('Thiếu trường '+label+'.');
    if(schema.saveCount!==1)issues.push('Không xác định duy nhất nút Cập nhật.');
    if(schema.uploadCount!==1)issues.push('Không xác định duy nhất ô tải ảnh sản phẩm.');
@@ -113,7 +113,7 @@ class ReplacementEditor{
    if(field.kind==='date')try{validateDate(value);}catch(error){problems.push(error.message);}
   }
   for(const field of schema.required){
-   if(!KNOWN_REQUIRED.has(field.label)||field.kind==='unsupported')problems.push('Trường bắt buộc chưa hỗ trợ: '+field.label);
+   const reqVal=values[field.label]===undefined?field.value:values[field.label];if(!KNOWN_REQUIRED.has(field.label)){if(!clean(reqVal))problems.push('Trường bắt buộc chưa hỗ trợ: '+field.label);}else if(field.kind==='unsupported')problems.push('Trường bắt buộc chưa hỗ trợ: '+field.label);
    if(['images','variants'].includes(field.kind))continue;
    const value=values[field.label]===undefined?field.value:values[field.label];
    if(value===undefined||value===null||!clean(value))problems.push('Thiếu trường bắt buộc: '+field.label);
