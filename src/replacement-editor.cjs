@@ -26,7 +26,7 @@ function readEditor(){
    if(controls(scope).length||scope.querySelector('.eds-date-picker,.eds-select,.shopee-selector,.product-category,.shopee-image-manager,.image-manager,.category-select')||scope.querySelector('input[type=file]'))break;
   }
   if(!scope||[...scope.querySelectorAll('.edit-label')].filter(visible).length>1){scope=e.parentElement;depth=1;}
-  const inputs=controls(scope),editor=inputs.find(c=>c.matches('.ql-editor'));
+  const inputs=controls(scope),editor=inputs.find(c=>c.matches('.ql-editor'))||(label==='Mô tả sản phẩm'?[...document.querySelectorAll('.ql-editor[contenteditable=true]')].find(visible):null);
   const select=[...scope.querySelectorAll('.eds-select,.shopee-selector,.product-category,.category-select')].find(visible);
   const category=label==='Ngành hàng';
   const image=/^(Hình ảnh sản phẩm|Hình ảnh t[ỷỉ] lệ 1:1)$/u.test(label);
@@ -132,9 +132,47 @@ class ReplacementEditor{
    const options=page.locator('.eds-option:visible,.eds-select-option:visible,.eds-select__option:visible,.shopee-option:visible,[role=option]:visible').filter({hasText:new RegExp('^'+String(value).replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'$')});
    if(await options.count()!==1)throw fail('Không có lựa chọn duy nhất '+field.label+': '+value+'. Chưa lưu.');await options.click();return;
   }
-  const input=field.kind==='description'?scope.locator('.ql-editor[contenteditable=true]'):scope.locator('input:not([type=hidden]):not([type=checkbox]):not([type=file]):visible,textarea:visible');
+  let input;
+  if(field.kind==='description'){
+   const descTab=page.locator('button,div,span,a').filter({hasText:/^Mô tả$/}).filter({visible:true}).first();
+   if(await descTab.count())await descTab.click({force:true}).catch(()=>{});
+   let descEditor=scope.locator('.ql-editor[contenteditable=true]');
+   if(await descEditor.count()!==1){
+    const labelLoc=page.locator('.edit-label').filter({hasText:/Mô tả sản phẩm/}).first();
+    if(await labelLoc.count()){
+     const row=labelLoc.locator('xpath=ancestor::*[contains(@class,"edit-row") or contains(@class,"product-edit-form-item") or contains(@class,"form-item")][1]');
+     if(await row.count()&&await row.locator('.ql-editor[contenteditable=true]').count()===1)descEditor=row.locator('.ql-editor[contenteditable=true]');
+    }
+   }
+   if(await descEditor.count()!==1){
+    const allEditors=page.locator('.ql-editor[contenteditable=true]');
+    if(await allEditors.count()===1)descEditor=allEditors;
+    else{const visEditors=page.locator('.ql-editor[contenteditable=true]:visible');if(await visEditors.count()===1)descEditor=visEditors;}
+   }
+   input=descEditor;
+  }else{
+   input=scope.locator('input:not([type=hidden]):not([type=checkbox]):not([type=file]):visible,textarea:visible');
+   if(await input.count()!==1){
+    const labelLoc=page.locator('.edit-label').filter({hasText:new RegExp('^\\s*\\*?\\s*'+field.label.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\s*\\*?\\s*$')}).first();
+    if(await labelLoc.count()){
+     const row=labelLoc.locator('xpath=ancestor::*[contains(@class,"edit-row") or contains(@class,"product-edit-form-item") or contains(@class,"form-item")][1]');
+     if(await row.count()){
+      const rowInput=row.locator('input:not([type=hidden]):not([type=checkbox]):not([type=file]):visible,textarea:visible');
+      if(await rowInput.count()===1)input=rowInput;
+     }
+    }
+   }
+  }
   if(await input.count()!==1)throw fail('Không xác định duy nhất ô '+field.label+'.','INTERFACE_CHANGED');
-  await input.scrollIntoViewIfNeeded();await input.fill(String(value));await input.blur();
+  await input.scrollIntoViewIfNeeded();
+  if(field.kind==='description'){
+   await input.click({force:true}).catch(()=>{});
+   await input.fill(String(value));
+   await input.evaluate((el,text)=>{if(el.innerText!==text)el.innerText=text;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));},String(value)).catch(()=>{});
+  }else{
+   await input.fill(String(value));
+  }
+  await input.blur();
  }
  assets(assets,count){
   const list=assets?.images||assets;if(!Array.isArray(list)||list.length!==count)throw fail('Ảnh đã xử lý không khớp danh sách trong bài viết.');
