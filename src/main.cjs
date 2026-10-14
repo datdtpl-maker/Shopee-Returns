@@ -1,6 +1,6 @@
 const {app,BrowserWindow,ipcMain,safeStorage,shell,dialog,clipboard,Tray,Menu,nativeImage,powerSaveBlocker}=require('electron');
 const fs=require('node:fs');const path=require('node:path');const { pathToFileURL }=require('node:url');
-try{require('dotenv').config();const envData=path.join(process.env.SRM_DATA_DIR||path.join(__dirname,'..','data'),'.env');if(fs.existsSync(envData))require('dotenv').config({path:envData});}catch{}
+try{require('dotenv').config();const envApp=path.join(__dirname,'..','.env');if(fs.existsSync(envApp))require('dotenv').config({path:envApp});const envData=path.join(process.env.SRM_DATA_DIR||path.join(__dirname,'..','data'),'.env');if(fs.existsSync(envData))require('dotenv').config({path:envData});}catch{}
 const {Store}=require('./core.cjs');const {Scanner}=require('./scanner.cjs');const {Integrations}=require('./integrations.cjs');
 const {Products,TARGET:PRODUCT_TARGET}=require('./products.cjs');const {ProductScanner}=require('./product-scanner.cjs');
 const {InterfaceMonitor}=require('./interface-monitor.cjs');
@@ -68,8 +68,10 @@ app.whenReady().then(async()=>{
   if(!store.data.settings.notionDatabaseId&&process.env.NOTION_DATABASE_ID){
     store.data.settings.notionDatabaseId=process.env.NOTION_DATABASE_ID.trim();
     store.data.settings.notionPageId=process.env.NOTION_PAGE_ID?.trim()||process.env.NOTION_DATABASE_ID.trim();
+    store.data.settings.notionEnabled=true;
   }
   if(!store.data.settings.chatId&&process.env.TELEGRAM_CHAT_ID)store.data.settings.chatId=process.env.TELEGRAM_CHAT_ID.trim();
+  store.save();
   interfaceMonitor=new InterfaceMonitor(dataDir,()=>emit());
   scanner=new Scanner(dataDir,interfaceMonitor);integrations=new Integrations(store,()=>secretValues);products=new Products(dataDir,store,integrations,new ProductScanner(scanner));
   replacementEditor=new ReplacementEditor(products.scanner);replacements=new ReplacementManager(dataDir,products,integrations,replacementEditor,replacementImages,require('./replacement-notion-images.cjs'));

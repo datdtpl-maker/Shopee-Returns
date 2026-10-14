@@ -31,6 +31,7 @@
     "files": [
       "src/**/*",
       "package.json",
+      ".env",
       "!**/*.map"
     ],
     "asar": false,
